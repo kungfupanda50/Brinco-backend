@@ -109,7 +109,7 @@ const pool = mysql.createPool({
     queueLimit: 0,
     enableKeepAlive: true,
     keepAliveInitialDelay: 10000,
-    ssl: { rejectUnauthorized: true }
+    ssl: { rejectUnauthorized: false }
 });
 
 const db = pool.promise();
