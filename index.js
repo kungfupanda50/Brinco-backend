@@ -27,9 +27,10 @@ const fs = require('fs');
 require('dotenv').config();
 const rateLimit = require('express-rate-limit');
 const app = express();
-const corsOrigins = process.env.FRONTEND_URL 
-  ? [process.env.FRONTEND_URL] 
-  : ['http://localhost:5173'];
+const corsOrigins = [
+  'http://localhost:5173', // Para tu computadora
+  'https://brinco-frontend.onrender.com' // Para la nube 
+];
 
 app.use(cors({
   origin: corsOrigins,
@@ -107,7 +108,8 @@ const pool = mysql.createPool({
     connectionLimit: 20,
     queueLimit: 0,
     enableKeepAlive: true,
-    keepAliveInitialDelay: 10000
+    keepAliveInitialDelay: 10000,
+    ssl: { rejectUnauthorized: true }
 });
 
 const db = pool.promise();
