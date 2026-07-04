@@ -44,6 +44,26 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'brinco_creativo_secret_2026';
 
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('cloudinary').v2;
+
+// Configurar Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Configurar Multer para que suba a Cloudinary en lugar de al disco local
+const storageCloud = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'brinco-erp',
+    allowed_formats: ['jpg', 'png', 'jpeg', 'gif', 'mp4']
+  },
+});
+const uploadCloud = multerLib({ storage: storageCloud });
+
 // =============================================================================
 // CONFIGURACIÓN DE RECURSOS Y ARCHIVOS
 // =============================================================================
@@ -422,10 +442,11 @@ app.put('/api/usuarios/:id', autenticar, autorizar('p_usuarios'), async (req, re
     }
 });
 
-app.post('/api/usuarios/:id/avatar', autenticar, autorizar('p_usuarios'), upload.single('avatar'), async (req, res) => {
+app.post('/api/usuarios/:id/avatar', autenticar, autorizar('p_usuarios'), uploadCloud.single('avatar'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'Archivo de imagen requerido' });
-        const url = `/uploads/${req.file.filename}`;
+        // Cloudinary nos devuelve la URL final en req.file.path
+        const url = req.file.path; 
         await db.query("UPDATE usuarios SET avatar_url = ? WHERE id = ?", [url, req.params.id]);
         res.json({ url });
     } catch (err) {
@@ -927,40 +948,30 @@ app.get('/api/ordenes/:id/evidencias',autenticar, autorizar('p_ordenes'),async (
 // ─────────────────────────────────────────────────────────────────────────────
 // Sube una o varias fotos nuevas a una orden
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/ordenes/:id/evidencias', autenticar, autorizar('p_ordenes'), upload.array('fotos', 10), async (req, res) => {
+app.post('/api/ordenes/:id/evidencias', autenticar, autorizar('p_ordenes'), uploadCloud.array('fotos', 10), async (req, res) => {
     const { id } = req.params;
     try {
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ error: 'No se recibieron archivos' });
         }
 
-        // ✅ Verificar tipos reales de archivo
-        const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'video/mp4'];
-        for (const file of req.files) {
-            const type = await fileTypeFromFile(file.path);
-            if (!type || !allowedMimes.includes(type.mime)) {
-                // Borrar el archivo no permitido
-                fs.unlinkSync(file.path);
-                return res.status(400).json({ 
-                    error: `Tipo de archivo no permitido: ${file.originalname}` 
-                });
-            }
-        }
-
+        // Cloudinary ya validó que sean imágenes/videos válidos.
         const inserts = req.files.map(file => {
-            const url = `/uploads/${file.filename}`;
+            // En Cloudinary, la URL final nos la devuelve en file.path
+            const url = file.path;
             return db.query(
                 'INSERT INTO orden_evidencias (orden_id, url_archivo) VALUES (?, ?)',
                 [id, url]
             );
         });
 
+        // Esperamos a que todas las fotos se hayan insertado en la base de datos
         const resultados = await Promise.all(inserts);
 
-        // Devolver los IDs y URLs de las fotos recién creadas
+        // Mapeamos los resultados para devolverle al frontend el ID real de la BD y la URL
         const nuevasFotos = resultados.map((r, i) => ({
-            id: r[0].insertId,
-            url_archivo: `/uploads/${req.files[i].filename}`,
+            id: r[0].insertId, // ID real generado por MySQL
+            url_archivo: req.files[i].path, // URL segura de Cloudinary
             tags: []
         }));
 
