@@ -45,6 +45,8 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'brinco_creativo_secret_2026';
 
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
+// Configurar Cloudinary
 const cloudinary = require('cloudinary').v2;
 
 // Configurar Cloudinary
@@ -54,15 +56,8 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Configurar Multer para que suba a Cloudinary en lugar de al disco local
-const storageCloud = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'brinco-erp',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'gif', 'mp4']
-  },
-});
-const uploadCloud = multerLib({ storage: storageCloud });
+// Multer en memoria (no toca el disco duro, perfecto para Render)
+const uploadMem = multerLib({ storage: multerLib.memoryStorage() });
 
 // =============================================================================
 // CONFIGURACIÓN DE RECURSOS Y ARCHIVOS
@@ -442,11 +437,21 @@ app.put('/api/usuarios/:id', autenticar, autorizar('p_usuarios'), async (req, re
     }
 });
 
-app.post('/api/usuarios/:id/avatar', autenticar, autorizar('p_usuarios'), uploadCloud.single('avatar'), async (req, res) => {
+app.post('/api/usuarios/:id/avatar', autenticar, autorizar('p_usuarios'), uploadMem.single('avatar'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'Archivo de imagen requerido' });
-        // Cloudinary nos devuelve la URL final en req.file.path
-        const url = req.file.path; 
+        
+        // Convertir el archivo de memoria a Base64
+        const b64 = Buffer.from(req.file.buffer).toString("base64");
+        const dataURI = "data:" + req.file.mimetype + ";base64," + b64;
+        
+        // Subir a Cloudinary
+        const uploadResponse = await cloudinary.uploader.upload(dataURI, {
+            folder: 'brinco-erp/avatars',
+            resource_type: 'image'
+        });
+        
+        const url = uploadResponse.secure_url;
         await db.query("UPDATE usuarios SET avatar_url = ? WHERE id = ?", [url, req.params.id]);
         res.json({ url });
     } catch (err) {
@@ -948,32 +953,37 @@ app.get('/api/ordenes/:id/evidencias',autenticar, autorizar('p_ordenes'),async (
 // ─────────────────────────────────────────────────────────────────────────────
 // Sube una o varias fotos nuevas a una orden
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/ordenes/:id/evidencias', autenticar, autorizar('p_ordenes'), uploadCloud.array('fotos', 10), async (req, res) => {
+app.post('/api/ordenes/:id/evidencias', autenticar, autorizar('p_ordenes'), uploadMem.array('fotos', 10), async (req, res) => {
     const { id } = req.params;
     try {
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ error: 'No se recibieron archivos' });
         }
 
-        // Cloudinary ya validó que sean imágenes/videos válidos.
-        const inserts = req.files.map(file => {
-            // En Cloudinary, la URL final nos la devuelve en file.path
-            const url = file.path;
-            return db.query(
+        const nuevasFotos = [];
+        for (const file of req.files) {
+            const b64 = Buffer.from(file.buffer).toString("base64");
+            const dataURI = "data:" + file.mimetype + ";base64," + b64;
+            
+            // Detectar si es imagen o video
+            const resource_type = file.mimetype.startsWith('video/') ? 'video' : 'image';
+            
+            const uploadResponse = await cloudinary.uploader.upload(dataURI, {
+                folder: 'brinco-erp/evidencias',
+                resource_type: resource_type
+            });
+            
+            const [result] = await db.query(
                 'INSERT INTO orden_evidencias (orden_id, url_archivo) VALUES (?, ?)',
-                [id, url]
+                [id, uploadResponse.secure_url]
             );
-        });
-
-        // Esperamos a que todas las fotos se hayan insertado en la base de datos
-        const resultados = await Promise.all(inserts);
-
-        // Mapeamos los resultados para devolverle al frontend el ID real de la BD y la URL
-        const nuevasFotos = resultados.map((r, i) => ({
-            id: r[0].insertId, // ID real generado por MySQL
-            url_archivo: req.files[i].path, // URL segura de Cloudinary
-            tags: []
-        }));
+            
+            nuevasFotos.push({
+                id: result.insertId,
+                url_archivo: uploadResponse.secure_url,
+                tags: []
+            });
+        }
 
         res.json({ message: 'Fotos subidas', fotos: nuevasFotos });
     } catch (err) {
