@@ -1246,8 +1246,20 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
         const [detalles] = await db.query("SELECT * FROM presupuestos_detalles WHERE presupuesto_id = ? ORDER BY orden_visual", [id]);
         const [imagenes] = await db.query("SELECT * FROM presupuestos_imagenes WHERE presupuesto_id = ?", [id]);
         
-        const getImageBase64 = (rutaRelativa) => {
+        // Función inteligente: Si es de Cloudinary la descarga, si es local la lee del disco
+        const getImageBase64 = async (rutaRelativa) => {
             try {
+                if (!rutaRelativa) return '';
+                
+                // Si es URL de internet (Cloudinary)
+                if (rutaRelativa.startsWith('http')) {
+                    const response = await fetch(rutaRelativa);
+                    const buffer = await response.arrayBuffer();
+                    const ext = rutaRelativa.split('.').pop().split('?')[0].toLowerCase().substring(0, 3) || 'jpeg';
+                    return `data:image/${ext};base64,${Buffer.from(buffer).toString('base64')}`;
+                }
+                
+                // Si es archivo local (imágenes viejas)
                 const absolutePath = path.join(process.cwd(), rutaRelativa);
                 if (fs.existsSync(absolutePath)) {
                     const buffer = fs.readFileSync(absolutePath);
@@ -1255,21 +1267,26 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                     return `data:image/${ext};base64,${buffer.toString('base64')}`;
                 }
                 return '';
-            } catch (e) { return ''; }
+            } catch (e) { 
+                console.error('Error procesando imagen para PDF:', e.message);
+                return ''; 
+            }
         };
 
         const imagenesPorLinea = {};
         const imagenesSueltas = [];
-        imagenes.forEach(img => {
-            const base64Url = getImageBase64(img.ruta_archivo);
-            if (!base64Url) return;
+        
+        for (const img of imagenes) {
+            const base64Url = await getImageBase64(img.ruta_archivo);
+            if (!base64Url) continue;
+            
             if (img.detalle_id) {
                 if (!imagenesPorLinea[img.detalle_id]) imagenesPorLinea[img.detalle_id] = [];
                 imagenesPorLinea[img.detalle_id].push({ url: base64Url, grande: img.es_grande === 1 });
             } else {
                 imagenesSueltas.push({ url: base64Url, grande: img.es_grande === 1 });
             }
-        });
+        }
 
         const generateImageTags = (imgs) => {
             if (!imgs || imgs.length === 0) return '';
