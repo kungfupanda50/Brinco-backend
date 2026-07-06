@@ -1259,19 +1259,20 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
         const [imagenes] = await db.query("SELECT * FROM presupuestos_imagenes WHERE presupuesto_id = ?", [id]);
         
         // Función inteligente: Si es de Cloudinary la descarga, si es local la lee del disco
-        const getImageBase64 = async (rutaRelativa) => {
+                const getImageBase64 = async (rutaRelativa) => {
             try {
                 if (!rutaRelativa) return '';
                 
-                // Si es URL de internet (Cloudinary)
                 if (rutaRelativa.startsWith('http')) {
-                    const response = await fetch(rutaRelativa);
-                    const buffer = await response.arrayBuffer();
-                    const ext = rutaRelativa.split('.').pop().split('?')[0].toLowerCase().substring(0, 3) || 'jpeg';
-                    return `data:image/${ext};base64,${Buffer.from(buffer).toString('base64')}`;
+                    // TRUCO: Reemplazamos '/upload/' por '/upload/w_600,q_auto/' para que Cloudinary envíe una imagen más ligera
+                    const optimizedUrl = rutaRelativa.replace('/upload/', '/upload/w_600,q_auto/');
+                    
+                    const response = await fetch(optimizedUrl);
+                    if (!response.ok) return '';
+                    const buffer = Buffer.from(await response.arrayBuffer());
+                    return `data:image/jpeg;base64,${buffer.toString('base64')}`;
                 }
                 
-                // Si es archivo local (imágenes viejas)
                 const absolutePath = path.join(process.cwd(), rutaRelativa);
                 if (fs.existsSync(absolutePath)) {
                     const buffer = fs.readFileSync(absolutePath);
@@ -1468,7 +1469,15 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             </div>
         </body></html>`;
 
-        const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
+        const browser = await puppeteer.launch({ 
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage', // Evita que use mucha memoria compartida
+                '--single-process' // Reduce el uso de RAM
+            ] 
+        });
+
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'networkidle0' });
         
