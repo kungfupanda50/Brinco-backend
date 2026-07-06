@@ -1238,7 +1238,6 @@ app.put('/api/presupuestos/:id/fecha', autenticar, async (req, res) => {
 });
 
 // 5. Generar PDF (Puppeteer)
-// 5. Generar PDF (Puppeteer)
 app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
     try {
         const { id } = req.params;
@@ -1488,10 +1487,13 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                 margin: { top: '0px', bottom: '30px', left: '0px', right: '0px' }
             });
             
-            res.setHeader('Content-Type', 'application/pdf');
+            /* res.setHeader('Content-Type', 'application/pdf');
             res.setHeader('Content-Disposition', `inline; filename=Cotizacion-${pres.numero_cotizacion}.pdf`);
-            res.send(pdfBuffer);
-
+            res.send(pdfBuffer); */
+        // En lugar de usar Puppeteer, mandamos el HTML al frontend
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+        
         } catch (pdfErr) {
             console.error('ERROR GENERANDO PDF:', pdfErr);
             res.status(500).json({ error: 'Error generando PDF: ' + pdfErr.message });
