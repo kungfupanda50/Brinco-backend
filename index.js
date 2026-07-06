@@ -1259,13 +1259,13 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
         const [imagenes] = await db.query("SELECT * FROM presupuestos_imagenes WHERE presupuesto_id = ?", [id]);
         
         // Función inteligente: Si es de Cloudinary la descarga, si es local la lee del disco
-                const getImageBase64 = async (rutaRelativa) => {
+        const getImageBase64 = async (rutaRelativa) => {
             try {
                 if (!rutaRelativa) return '';
                 
                 if (rutaRelativa.startsWith('http')) {
-                    // TRUCO: Reemplazamos '/upload/' por '/upload/w_600,q_auto/' para que Cloudinary envíe una imagen más ligera
-                    const optimizedUrl = rutaRelativa.replace('/upload/', '/upload/w_600,q_auto/');
+                    // Pedimos una imagen de 400px y formato jpg para que pese muy poco (10-30KB)
+                    const optimizedUrl = rutaRelativa.replace('/upload/', '/upload/w_400,q_auto,f_jpg/');
                     
                     const response = await fetch(optimizedUrl);
                     if (!response.ok) return '';
@@ -1469,42 +1469,48 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             </div>
         </body></html>`;
 
-        const browser = await puppeteer.launch({ 
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                '--disable-dev-shm-usage', // Evita que use mucha memoria compartida
-                '--single-process' // Reduce el uso de RAM
-            ] 
-        });
+                // Configuramos Puppeteer para ahorrar memoria
+        let browser;
+        try {
+            browser = await puppeteer.launch({ 
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    '--disable-dev-shm-usage',
+                    '--single-process'
+                ] 
+            });
+            
+            const page = await browser.newPage();
+            await page.setContent(html, { waitUntil: 'networkidle0' });
+            
+            const pdfBuffer = await page.pdf({ 
+                format: 'Letter', 
+                printBackground: true, 
+                displayHeaderFooter: true,
+                headerTemplate: '<div></div>',
+                footerTemplate: `
+                    <div style="width: 100%; font-size: 9px; color: #888; padding: 0 40px 0 140px; box-sizing: border-box; text-align: right;">
+                        pág <span class="pageNumber"></span> de <span class="totalPages"></span>
+                    </div>
+                `,
+                margin: { top: '0px', bottom: '30px', left: '0px', right: '0px' }
+            });
+            
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `inline; filename=Cotizacion-${pres.numero_cotizacion}.pdf`);
+            res.send(pdfBuffer);
 
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
-        
-        // NUEVO: Generar PDF con pie de página nativo de Puppeteer
-        const pdfBuffer = await page.pdf({ 
-            format: 'Letter', 
-            printBackground: true, 
-            displayHeaderFooter: true, // Activar cabeceras/pies
-            headerTemplate: '<div></div>', // Dejamos la cabecera vacía
-            footerTemplate: `
-                <div style="width: 100%; font-size: 9px; color: #888; padding: 0 40px 0 140px; box-sizing: border-box; text-align: right;">
-                    pág <span class="pageNumber"></span> de <span class="totalPages"></span>
-                </div>
-            `, // El padding-left de 140px evita que se meta en el cintillo azul
-            margin: { top: '0px', bottom: '30px', left: '0px', right: '0px' } // Damos 30px abajo para el número
-        });
-        
-        await browser.close();
-
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename=Cotizacion-${pres.numero_cotizacion}.pdf`);
-        res.send(pdfBuffer);
-    } catch (err) {
-        console.error('ERROR GENERANDO PDF:', err); // Esto nos mostrará el error real en la consola de Node
-        res.status(500).json({ error: 'Error generando PDF: ' + err.message });
-    }
-});
+        } catch (pdfErr) {
+            console.error('ERROR GENERANDO PDF:', pdfErr);
+            res.status(500).json({ error: 'Error generando PDF: ' + pdfErr.message });
+        } finally {
+            // ESTO ES CLAVE: Nos aseguramos de que Chrome se cierre SIEMPRE
+            if (browser) {
+                await browser.close();
+                console.log('✅ Navegador Chrome cerrado correctamente. Memoria liberada.');
+            }
+        }
 
 // Función de espera (para reintentar cuando Google nos bloquee por 1 minuto)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
