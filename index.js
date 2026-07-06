@@ -1134,6 +1134,7 @@ app.post('/api/presupuestos/upload-img', autenticar, uploadMem.single('imagen'),
 });
 
 // Crear Presupuesto
+// Crear Presupuesto
 app.post('/api/presupuestos', autenticar, async (req, res) => {
     const { cliente_id, orden_id, plantilla_id, moneda_id, lineas, imagenes_sueltas, subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional } = req.body;
     const conn = await pool.promise().getConnection();
@@ -1152,44 +1153,55 @@ app.post('/api/presupuestos', autenticar, async (req, res) => {
         if (lastPres.length > 0) consecutivo = parseInt(lastPres[0].numero_cotizacion.slice(-2)) + 1;
         const numeroCotizacion = `${prefix}${String(consecutivo).padStart(2, '0')}`;
 
-        // Mapeamos 'plantilla_id' del frontend a 'tema_id' de la DB, y asignamos 'simple' a tipo_estructura
         const [resP] = await conn.query(
             `INSERT INTO presupuestos (numero_cotizacion, cliente_id, orden_id, usuario_id, tema_id, moneda_id, tipo_estructura, subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional) 
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-            [numeroCotizacion, cliente_id, orden_id || null, req.usuario.id, plantilla_id, moneda_id, 'simple', subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional]
+            [numeroCotizacion, cliente_id, orden_id, req.usuario.id, plantilla_id, moneda_id, 'simple', subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional]
         );
+        
         const presupuestoId = resP.insertId;
 
-        for (let i = 0; i < lineas.length; i++) {
-            const linea = lineas[i];
+        // Guardar líneas y sus imágenes
+        for (const linea of lineas) {
             const [resL] = await conn.query(
-                `INSERT INTO presupuestos_detalles (presupuesto_id, orden_visual, descripcion, metadata, cantidad, precio_unitario, total_linea, color, medidas) VALUES (?,?,?,?,?,?,?,?,?)`,
-                [presupuestoId, i, linea.descripcion, JSON.stringify(linea.metadata || {}), linea.cantidad, linea.precio_unitario, linea.total_linea, linea.color, linea.medidas]
+                "INSERT INTO presupuestos_detalles (presupuesto_id, descripcion, metadata, color, medidas, cantidad, precio_unitario, total_linea) VALUES (?,?,?,?,?,?,?,?)",
+                [presupuestoId, linea.descripcion, JSON.stringify(linea.metadata || {}), linea.color || '', linea.medidas || '', linea.cantidad, linea.precio_unitario, linea.total_linea]
             );
+            
+            const detalleId = resL.insertId;
+            
             if (linea.imagenes && linea.imagenes.length > 0) {
                 for (const img of linea.imagenes) {
-                    // CAMBIO: img ahora es un objeto { url, grande }, extraemos la url
-                    const esGrande = img.grande ? 1 : 0;
-                    await conn.query("INSERT INTO presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)", 
-                        [presupuestoId, resL.insertId, img.url, esGrande]);
+                    // AQUÍ ESTABA EL ERROR: Extraemos la URL del objeto
+                    const imgUrl = typeof img === 'string' ? img : img.url;
+                    const esGrande = typeof img === 'string' ? 0 : (img.grande ? 1 : 0);
+                    await conn.query(
+                        "INSERT INTO presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)",
+                        [presupuestoId, detalleId, imgUrl, esGrande]
+                    );
                 }
             }
         }
+
+        // Guardar imágenes sueltas
         if (imagenes_sueltas && imagenes_sueltas.length > 0) {
             for (const img of imagenes_sueltas) {
-                // CAMBIO: Extraer datos del objeto y guardar es_grande
+                // AQUÍ TAMBIÉN: Extraemos la URL del objeto
                 const imgUrl = typeof img === 'string' ? img : img.url;
-                const esGrande = typeof img === 'string' ? false : (img.grande ? 1 : 0);
-                await conn.query("INSERT INTO presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)", 
-                    [presupuestoId, null, imgUrl, esGrande]);
+                const esGrande = typeof img === 'string' ? 0 : (img.grande ? 1 : 0);
+                await conn.query(
+                    "INSERT INTO presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)",
+                    [presupuestoId, null, imgUrl, esGrande]
+                );
             }
         }
 
         await conn.commit();
-        res.json({ id: presupuestoId, numero: numeroCotizacion, message: 'Presupuesto creado' });
+        res.json({ id: presupuestoId });
     } catch (err) {
         await conn.rollback();
-        res.status(500).json({ error: 'Error al crear presupuesto: ' + err.message });
+        console.error('ERROR AL GUARDAR PRESUPUESTO:', err.message);
+        res.status(500).json({ error: 'Error al guardar el presupuesto: ' + err.message });
     } finally {
         conn.release();
     }
