@@ -1238,6 +1238,7 @@ app.put('/api/presupuestos/:id/fecha', autenticar, async (req, res) => {
 });
 
 // 5. Generar PDF (Puppeteer)
+// 5. Generar PDF (Puppeteer)
 app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
     try {
         const { id } = req.params;
@@ -1258,15 +1259,12 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
         const [detalles] = await db.query("SELECT * FROM presupuestos_detalles WHERE presupuesto_id = ? ORDER BY orden_visual", [id]);
         const [imagenes] = await db.query("SELECT * FROM presupuestos_imagenes WHERE presupuesto_id = ?", [id]);
         
-        // Función inteligente: Si es de Cloudinary la descarga, si es local la lee del disco
         const getImageBase64 = async (rutaRelativa) => {
             try {
                 if (!rutaRelativa) return '';
                 
                 if (rutaRelativa.startsWith('http')) {
-                    // Pedimos una imagen de 400px y formato jpg para que pese muy poco (10-30KB)
                     const optimizedUrl = rutaRelativa.replace('/upload/', '/upload/w_400,q_auto,f_jpg/');
-                    
                     const response = await fetch(optimizedUrl);
                     if (!response.ok) return '';
                     const buffer = Buffer.from(await response.arrayBuffer());
@@ -1312,7 +1310,6 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             }).join('')}</div>`;
         };
 
-        // LÓGICA CONDICIONAL PARA COLUMNAS DE COLOR Y MEDIDAS
         const tieneColor = detalles.some(d => d.color && d.color.trim() !== '');
         const tieneMedidas = detalles.some(d => d.medidas && d.medidas.trim() !== '');
 
@@ -1386,12 +1383,9 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             .sueltas-section { margin-top: 30px; border-top: 2px solid #eee; padding-top: 20px; }
             .totales { text-align: right; margin-top: 30px; }
             .totales p { margin: 5px 0; }
-
             .totales { page-break-inside: avoid; break-inside: avoid; }
             .footer { page-break-inside: avoid; break-inside: avoid; }
-            /* Evita que un huérfano del footer se quede solo arriba */
             .footer-nota, .footer-bancos, .footer-empresa { page-break-inside: avoid; }
-
             .footer { margin-top: 50px; border-top: 2px solid ${pres.color_primario}; padding-top: 20px; font-size: 10px; color: #555; display: block; text-align: left; }
             .footer-nota { line-height: 1.5; margin-bottom: 15px; text-align: left; }
             .footer-bancos { font-weight: bold; color: #333; margin-bottom: 25px; line-height: 1.4; text-align: left; }
@@ -1437,9 +1431,8 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                 
                 ${seccionSueltas}
                 ${textoAdicionalHTML}
- 
-                <!-- BLOQUE 1: TOTALES (Independiente) -->
-                <div style="page-break-inside: avoid; padding-top: 40px;">
+                
+                <div style="page-break-inside: avoid; padding-top: 40px; padding-bottom: 10px;">
                     <div class="totales">
                         ${parseFloat(pres.descuento) > 0 ? `
                             <p>Subtotal: ${pres.moneda_simbolo} ${(parseFloat(pres.subtotal) + parseFloat(pres.costo_envio || 0)).toFixed(2)}</p>
@@ -1449,14 +1442,13 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                     </div>
                 </div>
 
-                <!-- BLOQUE 2: FOOTER (Independiente) -->
                 <div class="footer" style="page-break-inside: avoid;">
                     <div class="footer-nota">
                         <p style="margin:0;"><strong>Nota:</strong> ${notaTexto}</p>
                     </div>
                     <div class="footer-bancos">
-                        BI Cuenta: 0000-0000-0000-0000<br>
-                        Banrural Cuenta Ahorros: 04913600769182<br>
+                        BAC Cuenta: 0000-0000-0000-0000<br>
+                        Banrural Cuenta: 04913600769182<br>
                         A nombre de: Vivian Roxana Villatoro Rodríguez
                     </div>
                     <div class="footer-empresa">
@@ -1469,7 +1461,6 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             </div>
         </body></html>`;
 
-                // Configuramos Puppeteer para ahorrar memoria
         let browser;
         try {
             browser = await puppeteer.launch({ 
@@ -1505,12 +1496,17 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             console.error('ERROR GENERANDO PDF:', pdfErr);
             res.status(500).json({ error: 'Error generando PDF: ' + pdfErr.message });
         } finally {
-            // ESTO ES CLAVE: Nos aseguramos de que Chrome se cierre SIEMPRE
             if (browser) {
                 await browser.close();
                 console.log('✅ Navegador Chrome cerrado correctamente. Memoria liberada.');
             }
         }
+
+    } catch (err) {
+        console.error('ERROR GENERAL EN PDF:', err);
+        res.status(500).json({ error: 'Error general generando PDF: ' + err.message });
+    }
+});
 
 // Función de espera (para reintentar cuando Google nos bloquee por 1 minuto)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
