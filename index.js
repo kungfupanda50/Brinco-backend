@@ -1363,8 +1363,20 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
 
         let html = `
         <html><head><style>
-            body { margin: 0; padding: 0; font-family: Arial, sans-serif; color: #333; }
-            .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 100px; background-color: #1a3a5c; display: flex; align-items: flex-start; justify-content: center; padding-top: 40px; z-index: -1; }
+            body { margin: 0; padding: 0; font-family: Arial, sans-serif; color: #333; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;}
+            .sidebar { 
+                        position: fixed; 
+                        left: 0; top: 0; bottom: 0; 
+                        width: 100px; 
+                        background-color: #1a3a5c; 
+                        display: flex; 
+                        align-items: flex-start; 
+                        justify-content: center; 
+                        padding-top: 40px; 
+                        z-index: -1; 
+                        -webkit-print-color-adjust: exact !important; 
+                        print-color-adjust: exact !important; /* ESTA LÍNEA FUERZA EL COLOR */
+                    }
             .sidebar-logo { max-width: 90px; max-height: 120px; object-fit: contain; }
             .content { margin-left: 100px; padding: 40px; }  
             .header-info { margin-bottom: 30px; border-bottom: 2px solid ${pres.color_secundario}; padding-bottom: 20px; }
@@ -1372,7 +1384,7 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             .header-data { font-size: 14px; color: #333; margin: 0 0 8px 0; }
             .header-flex { display: flex; justify-content: space-between; }
             .tabla { width: 100%; border-collapse: collapse; margin-top: 20px; table-layout: fixed; }
-            .tabla th { background-color: ${pres.color_secundario}; color: white; padding: 10px; text-align: left; font-size: 14px; }
+            .tabla th { background-color: ${pres.color_secundario}; color: white; padding: 10px; text-align: left; font-size: 14px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;}
             .tabla td { border-bottom: 1px solid #ddd; padding: 10px; vertical-align: top; word-wrap: break-word; }
             .desc-text { margin-bottom: 8px; }
             .img-container { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
@@ -1493,7 +1505,7 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
         // En lugar de usar Puppeteer, mandamos el HTML al frontend
         res.setHeader('Content-Type', 'text/html');
         res.send(html);
-        
+
         } catch (pdfErr) {
             console.error('ERROR GENERANDO PDF:', pdfErr);
             res.status(500).json({ error: 'Error generando PDF: ' + pdfErr.message });
