@@ -1111,33 +1111,25 @@ app.get('/api/presupuestos/data-inicial', autenticar, async (req, res) => {
 });
 
 // Endpoint para subir imágenes (por línea o sueltas)
-app.post('/api/presupuestos/upload-img', autenticar, uploadPresupuesto.single('imagen'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No se subió la imagen' });
-    
-    // Si es GIF, no comprimimos para evitar errores de sharp con animaciones
-    if (req.file.mimetype === 'image/gif') {
-        return res.json({ url: `/uploads/presupuestos/${req.file.filename}` });
-    }
-
+// Subir imagen de referencia para presupuestos (AHORA A CLOUDINARY)
+app.post('/api/presupuestos/upload-img', autenticar, uploadMem.single('imagen'), async (req, res) => {
     try {
-        const filePath = req.file.path;
-        const compressedPath = filePath + '_comp.jpg';
+        if (!req.file) return res.status(400).json({ error: 'No se subió la imagen' });
         
-        await sharp(filePath)
-            .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 80 })
-            .toFile(compressedPath);
-
-        // Intentar borrar el original, si Windows lo bloquea, no pasa nada, usamos el comprimido
-        try { fs.unlinkSync(filePath); } catch (e) { /* Ignorar error EBUSY */ }
+        // Convertir el archivo de memoria a Base64
+        const b64 = Buffer.from(req.file.buffer).toString("base64");
+        const dataURI = "data:" + req.file.mimetype + ";base64," + b64;
         
-        // Renombrar el comprimido al nombre original
-        fs.renameSync(compressedPath, filePath);
-
-        res.json({ url: `/uploads/presupuestos/${req.file.filename}` });
+        // Subir a Cloudinary
+        const uploadResponse = await cloudinary.uploader.upload(dataURI, {
+            folder: 'brinco-erp/presupuestos',
+            resource_type: 'image'
+        });
+        
+        res.json({ url: uploadResponse.secure_url });
     } catch (err) {
-        console.error('Error al comprimir imagen, usando original:', err.message);
-        res.json({ url: `/uploads/presupuestos/${req.file.filename}` });
+        console.error('Error al subir imagen de presupuesto:', err.message);
+        res.status(500).json({ error: 'Error al subir imagen' });
     }
 });
 
