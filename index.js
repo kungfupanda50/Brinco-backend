@@ -1113,39 +1113,14 @@ app.get('/api/caja/resumen', autenticar, autorizar('p_caja'), async (req, res) =
 // APERTURA DE CAJA
 // =============================================================================
 
-app.get('/api/caja/abierta', autenticar, autorizar('p_caja'), async (req, res) => {
-    try {
+app.get('/api/caja/abierta', async (req, res) => {
 
-        const usuarioId = req.user.id;
+    console.log("ENTRÓ A /api/caja/abierta");
 
-        const [rows] = await db.query(`
-            SELECT
-                cc.id,
-                cc.usuario_id,
-                u.nombre,
-                cc.fecha_apertura,
-                cc.monto_inicial
-            FROM brinco_creativo.cajas_cierres cc
-            INNER JOIN brinco_creativo.usuarios u
-                ON u.id = cc.usuario_id
-            WHERE
-                cc.usuario_id = ?
-                AND cc.estado='Abierta'
-            LIMIT 1
-        `, [usuarioId]);
+    return res.json({
+        prueba: true
+    });
 
-        if (rows.length === 0) {
-            return res.json({ abierta: false });
-        }
-
-        res.json({
-            abierta: true,
-            ...rows[0]
-        });
-
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
 });
 
 app.post('/api/caja/apertura', autenticar, autorizar('p_apertura_caja'), async (req, res) => {
