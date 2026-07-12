@@ -876,7 +876,55 @@ app.post('/api/entradas', autenticar, autorizar('p_entrada_mercancia'), async (r
     finally { conn.release(); }
 });
 
+// =============================================================================
+// CATÁLOGO DE MÉTODOS DE PAGO
+// =============================================================================
 
+app.get(
+    '/api/catalogos/metodos-pago',
+    autenticar,
+    autorizar('p_caja'),
+    async (req, res) => {
+
+        try {
+
+            const [rows] = await db.query(`
+                SELECT
+
+                    id,
+                    nombre,
+                    codigo,
+                    icono,
+                    color,
+                    requiere_referencia,
+                    permite_vuelto,
+                    permite_pago_mixto,
+                    activo,
+                    orden_visualizacion
+
+                FROM brinco_creativo.catalogo_metodos_pago
+
+                WHERE activo = 1
+
+                ORDER BY orden_visualizacion,
+                         nombre
+            `);
+
+            res.json(rows);
+
+        } catch (err) {
+
+            console.error(err);
+
+            res.status(500).json({
+                error: 'Error al obtener el catálogo de métodos de pago.',
+                detalle: err.message
+            });
+
+        }
+
+    }
+);
 
 // =============================================================================
 // CAJA, FLUJO Y PAGOS
@@ -892,14 +940,163 @@ app.get('/api/pagos', autenticar, autorizar('p_caja'), async (req, res) => {
     }
 });
 
-app.post('/api/pagos', autenticar, autorizar('p_caja'), async (req, res) => {
-    const { orden_id, monto, tipo_movimiento, categoria_pago, metodo_pago, referencia_pago, nota_pago } = req.body;
-    try {
-        const [result] = await db.query("INSERT INTO pagos (orden_id, monto, tipo_movimiento, categoria_pago, metodo_pago, referencia_pago, nota_pago) VALUES (?,?,?,?,?,?,?)", [orden_id || null, monto, tipo_movimiento, categoria_pago, metodo_pago, referencia_pago, nota_pago]);
-        res.json({ id: result.insertId });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) => {
+
+    const {
+        orden_id,
+        monto,
+        tipo_movimiento,
+        categoria_pago,
+        metodo_pago_id,
+        referencia_pago,
+        nota_pago
+    } = req.body;
+
+    const usuario_id = req.user.id;
+
+    // =========================================================
+    // VALIDACIONES
+    // =========================================================
+
+    if (!monto || isNaN(monto) || Number(monto) <= 0) {
+        return res.status(400).json({
+            error: 'Debe ingresar un monto válido mayor que cero.'
+        });
     }
+
+    if (!tipo_movimiento) {
+        return res.status(400).json({
+            error: 'Debe indicar el tipo de movimiento.'
+        });
+    }
+
+    if (!metodo_pago_id) {
+        return res.status(400).json({
+            error: 'Debe seleccionar un método de pago.'
+        });
+    }
+
+    try {
+
+        // =========================================================
+        // BUSCAR CAJA ABIERTA DEL USUARIO
+        // =========================================================
+
+        const [caja] = await db.query(`
+            SELECT
+                id
+            FROM brinco_creativo.cajas_cierres
+            WHERE usuario_id = ?
+              AND estado = 'Abierta'
+            LIMIT 1
+        `, [usuario_id]);
+
+        if (caja.length === 0) {
+            return res.status(400).json({
+                error: 'Debe abrir una caja antes de registrar movimientos.'
+            });
+        }
+
+        const caja_id = caja[0].id;
+
+        // =========================================================
+        // VALIDAR MÉTODO DE PAGO
+        // =========================================================
+
+        const [metodo] = await db.query(`
+            SELECT
+                id,
+                nombre,
+                codigo,
+                requiere_referencia,
+                permite_vuelto,
+                permite_pago_mixto,
+                activo
+            FROM brinco_creativo.catalogo_metodos_pago
+            WHERE id = ?
+            LIMIT 1
+        `, [metodo_pago_id]);
+
+        if (metodo.length === 0) {
+            return res.status(400).json({
+                error: 'El método de pago seleccionado no existe.'
+            });
+        }
+
+        if (Number(metodo[0].activo) !== 1) {
+            return res.status(400).json({
+                error: 'El método de pago está deshabilitado.'
+            });
+        }
+
+        if (
+            Number(metodo[0].requiere_referencia) === 1 &&
+            (!referencia_pago || referencia_pago.trim() === '')
+        ) {
+            return res.status(400).json({
+                error: 'Este método de pago requiere una referencia.'
+            });
+        }
+
+        // =========================================================
+        // REGISTRAR MOVIMIENTO
+        // =========================================================
+
+        const [result] = await db.query(`
+            INSERT INTO brinco_creativo.pagos
+            (
+                orden_id,
+                caja_cierre_id,
+                monto,
+                tipo_movimiento,
+                categoria_pago,
+                metodo_pago_id,
+                referencia_pago,
+                nota_pago
+            )
+            VALUES
+            (
+                ?, ?, ?, ?, ?, ?, ?, ?
+            )
+        `,
+        [
+            orden_id || null,
+            caja_id,
+            Number(monto),
+            tipo_movimiento,
+            categoria_pago,
+            metodo_pago_id,
+            referencia_pago || null,
+            nota_pago || null
+        ]);
+
+        // =========================================================
+        // RESPUESTA
+        // =========================================================
+
+        res.json({
+            ok: true,
+            mensaje: 'Movimiento registrado correctamente.',
+            id: result.insertId,
+            caja_cierre_id: caja_id,
+            metodo_pago: {
+                id: metodo[0].id,
+                nombre: metodo[0].nombre,
+                codigo: metodo[0].codigo
+            }
+        });
+
+    } catch (err) {
+
+        console.error(err);
+
+        res.status(500).json({
+            error: 'Error interno del servidor.',
+            detalle: err.message
+        });
+
+    }
+
 });
 
 app.get('/api/caja/resumen', autenticar, autorizar('p_caja'), async (req, res) => {
@@ -910,6 +1107,303 @@ app.get('/api/caja/resumen', autenticar, autorizar('p_caja'), async (req, res) =
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
+});
+
+// =============================================================================
+// APERTURA DE CAJA
+// =============================================================================
+
+app.get('/api/caja/abierta', autenticar, autorizar('p_caja'), async (req, res) => {
+    try {
+
+        const usuarioId = req.user.id;
+
+        const [rows] = await db.query(`
+            SELECT
+                cc.id,
+                cc.usuario_id,
+                u.nombre,
+                cc.fecha_apertura,
+                cc.monto_inicial
+            FROM brinco_creativo.cajas_cierres cc
+            INNER JOIN brinco_creativo.usuarios u
+                ON u.id = cc.usuario_id
+            WHERE
+                cc.usuario_id = ?
+                AND cc.estado='Abierta'
+            LIMIT 1
+        `, [usuarioId]);
+
+        if (rows.length === 0) {
+            return res.json({ abierta: false });
+        }
+
+        res.json({
+            abierta: true,
+            ...rows[0]
+        });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/caja/apertura', autenticar, autorizar('p_apertura_caja'), async (req, res) => {
+
+    const { monto_inicial } = req.body;
+    const usuarioId = req.user.id;
+
+    try {
+
+        if (monto_inicial === undefined || isNaN(monto_inicial) || Number(monto_inicial) < 0) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Debe indicar un monto inicial válido.'
+            });
+        }
+
+        const [cajaAbierta] = await db.query(`
+            SELECT id
+            FROM brinco_creativo.cajas_cierres
+            WHERE usuario_id = ?
+            AND estado = 'Abierta'
+            LIMIT 1
+        `, [usuarioId]);
+
+        if (cajaAbierta.length > 0) {
+            return res.status(409).json({
+                ok: false,
+                error: 'Ya existe una caja abierta para este usuario.'
+            });
+        }
+
+        const [resultado] = await db.query(`
+            INSERT INTO brinco_creativo.cajas_cierres
+            (
+                usuario_id,
+                fecha_apertura,
+                monto_inicial,
+                estado
+            )
+            VALUES
+            (
+                ?,
+                NOW(),
+                ?,
+                'Abierta'
+            )
+        `, [
+            usuarioId,
+            Number(monto_inicial)
+        ]);
+
+        res.json({
+            ok: true,
+            mensaje: 'Caja abierta correctamente.',
+            caja_id: resultado.insertId
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            ok: false,
+            error: error.message
+        });
+
+    }
+
+});
+
+
+// =============================================================================
+// CIERRE DE CAJA
+// =============================================================================
+
+app.post('/api/caja/cierre', autenticar, autorizar('p_cierre_caja'), async (req, res) => {
+
+    const usuarioId = req.user.id;
+    const { monto_real, observaciones } = req.body;
+
+    try {
+
+        const [cajas] = await db.query(`
+            SELECT *
+            FROM brinco_creativo.cajas_cierres
+            WHERE usuario_id = ?
+            AND estado = 'Abierta'
+            LIMIT 1
+        `, [usuarioId]);
+
+        if (cajas.length === 0) {
+            return res.status(404).json({
+                ok: false,
+                error: 'No existe una caja abierta para este usuario.'
+            });
+        }
+
+        const caja = cajas[0];
+
+        const [movimientos] = await db.query(`
+            SELECT
+
+                COALESCE(SUM(
+                    CASE
+                        WHEN tipo_movimiento='Ingreso'
+                        THEN monto
+                        ELSE 0
+                    END
+                ),0) ingresos,
+
+                COALESCE(SUM(
+                    CASE
+                        WHEN tipo_movimiento='Egreso'
+                        THEN monto
+                        ELSE 0
+                    END
+                ),0) egresos
+
+            FROM brinco_creativo.pagos
+
+            WHERE caja_cierre_id = ?
+
+        `, [caja.id]);
+
+        const ingresos = Number(movimientos[0].ingresos);
+        const egresos = Number(movimientos[0].egresos);
+
+        const esperado =
+            Number(caja.monto_inicial) +
+            ingresos -
+            egresos;
+
+        const diferencia =
+            Number(monto_real) -
+            esperado;
+
+        await db.query(`
+            UPDATE brinco_creativo.cajas_cierres
+            SET
+
+                fecha_cierre = NOW(),
+
+                monto_final_esperado = ?,
+
+                monto_final_real = ?,
+
+                diferencia = ?,
+
+                observaciones = ?,
+
+                estado = 'Cerrada'
+
+            WHERE id = ?
+        `, [
+
+            esperado,
+            Number(monto_real),
+            diferencia,
+            observaciones,
+            caja.id
+
+        ]);
+
+        res.json({
+
+            ok: true,
+
+            mensaje: 'Caja cerrada correctamente.',
+
+            esperado,
+
+            diferencia
+
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+
+            ok: false,
+
+            error: error.message
+
+        });
+
+    }
+
+});
+
+
+// =============================================================================
+// HISTORICO DE CAJAS
+// =============================================================================
+
+app.get('/api/caja/historico', autenticar, autorizar('p_historial_caja'), async (req, res) => {
+
+    try {
+
+        const [rows] = await db.query(`
+
+            SELECT
+
+                cc.id,
+
+                cc.usuario_id,
+
+                u.nombre AS usuario,
+
+                cc.fecha_apertura,
+
+                cc.fecha_cierre,
+
+                cc.monto_inicial,
+
+                cc.monto_final_esperado,
+
+                cc.monto_final_real,
+
+                cc.diferencia,
+
+                cc.estado,
+
+                cc.observaciones
+
+            FROM brinco_creativo.cajas_cierres cc
+
+            INNER JOIN brinco_creativo.usuarios u
+
+                ON u.id = cc.usuario_id
+
+            ORDER BY cc.id DESC
+
+        `);
+
+        res.json({
+
+            ok: true,
+
+            data: rows
+
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+
+            ok: false,
+
+            error: error.message
+
+        });
+
+    }
+
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1551,7 +2045,7 @@ app.post('/api/presupuestos/ia-descripcion', autenticar, async (req, res) => {
         Enfócate en la calidad, el método de personalización y el impacto visual. 
         Varía la redacción siempre.
         Redacta el texto como personalizado para un cliente, no digas 
-        -Diseñamos y grabamos trofeos- en su lugar di -Diseño y grabado de trofeo con estilo único-.
+        -Diseñamos y grabamos- en su lugar di -Diseño y grabado de xxxx con estilo único-.
         Revisa que no se los estas vendiendo al público general, sino a un cliente que quiere un presupuesto formal.
         Recuerda que el cliente ya te solicitó algo, este servicio es algo ya pactado, no intentes venderle algo más, solo describe lo que ya se va a hacer.
         REGLAS: No uses comillas, ni simples ni dobles. No saludes. No ofrezcas opciones. Responde ÚNICAMENTE con el texto de la descripción.`;
