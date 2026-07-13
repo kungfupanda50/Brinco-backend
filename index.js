@@ -951,7 +951,7 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
         nota_pago
     } = req.body;
 
-    const usuario_id = req.user.id;
+    const usuario_id = req.usuario.id;
 
     // =========================================================
     // VALIDACIONES
@@ -1113,10 +1113,10 @@ app.get('/api/caja/resumen', autenticar, autorizar('p_caja'), async (req, res) =
 // =============================================================================
 
 app.get('/api/caja/abierta', autenticar, autorizar('p_caja'), async (req, res) => {
-        console.log('req.user =', req.user);
+        console.log('req.usuario =', req.usuario);
     try {
 
-        const usuarioId = req.user.id;
+        const usuarioId = req.usuario.id;
 
         const [rows] = await db.query(`
             SELECT
@@ -1151,7 +1151,7 @@ app.get('/api/caja/abierta', autenticar, autorizar('p_caja'), async (req, res) =
 app.post('/api/caja/apertura', autenticar, autorizar('p_apertura_caja'), async (req, res) => {
 
     const { monto_inicial } = req.body;
-    const usuarioId = req.user.id;
+    const usuarioId = req.usuario.id;
 
     try {
 
@@ -1223,7 +1223,7 @@ app.post('/api/caja/apertura', autenticar, autorizar('p_apertura_caja'), async (
 
 app.post('/api/caja/cierre', autenticar, autorizar('p_cierre_caja'), async (req, res) => {
 
-    const usuarioId = req.user.id;
+    const usuarioId = req.usuario.id;
     const { monto_real, observaciones } = req.body;
 
     try {
