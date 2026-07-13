@@ -168,8 +168,7 @@ const autorizar = (permisoRequerido) => {
     return async (req, res, next) => {
         try {
             const [rows] = await db.query(
-                `SELECT p.p_dashboard, p.p_clientes, p.p_ordenes, p.p_nueva_orden, p.p_inventario, 
-                        p.p_proveedores, p.p_entrada_mercancia, p.p_caja, p.p_cat_clientes, p.p_cat_productos, p.p_usuarios
+                `SELECT *
                  FROM usuarios_permisos p WHERE p.usuario_id = ?`,
                 [req.usuario.id]
             );
