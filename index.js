@@ -930,13 +930,77 @@ app.get(
 // =============================================================================
 
 app.get('/api/pagos', autenticar, autorizar('p_caja'), async (req, res) => {
+
     try {
-        const sql = "SELECT p.*, o.id as orden_num, c.nombre_completo as cliente_nombre FROM pagos p LEFT JOIN ordenes o ON p.orden_id = o.id LEFT JOIN clientes c ON o.cliente_id = c.id ORDER BY p.fecha_pago DESC";
+
+        const sql = `
+            SELECT
+
+                p.id,
+                p.orden_id,
+                p.caja_cierre_id,
+                p.fecha_pago,
+                p.monto,
+                p.tipo_movimiento,
+                p.categoria_pago,
+
+                p.metodo_pago_id,
+                mp.nombre AS metodo_pago_nombre,
+                mp.codigo AS metodo_pago_codigo,
+
+                p.referencia_pago,
+                p.nota_pago,
+
+                p.origen_pago,
+                p.descripcion_origen,
+
+                o.id AS orden_num,
+                o.estado AS orden_estado,
+
+                c.id AS cliente_id,
+                c.nombre_completo AS cliente_nombre,
+
+                CONCAT(
+                    '#',
+                    o.id,
+                    ' - ',
+                    c.nombre_completo
+                ) AS orden_descripcion
+
+            FROM brinco_creativo.pagos p
+
+            LEFT JOIN brinco_creativo.catalogo_metodos_pago mp
+                ON mp.id = p.metodo_pago_id
+
+            LEFT JOIN brinco_creativo.ordenes o
+                ON o.id = p.orden_id
+
+            LEFT JOIN brinco_creativo.clientes c
+                ON c.id = o.cliente_id
+
+            ORDER BY
+                p.fecha_pago DESC,
+                p.id DESC
+        `;
+
         const [results] = await db.query(sql);
+
         res.json(results);
+
     } catch (err) {
-        res.status(500).json({ error: err.message });
+
+        console.error(err);
+
+        res.status(500).json({
+
+            error: 'Error al obtener los movimientos de caja.',
+
+            detalle: err.message
+
+        });
+
     }
+
 });
 
 app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) => {
@@ -948,7 +1012,11 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
         categoria_pago,
         metodo_pago_id,
         referencia_pago,
-        nota_pago
+        nota_pago,
+
+        origen_pago,
+        descripcion_origen
+
     } = req.body;
 
     const usuario_id = req.usuario.id;
@@ -958,21 +1026,27 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
     // =========================================================
 
     if (!monto || isNaN(monto) || Number(monto) <= 0) {
+
         return res.status(400).json({
             error: 'Debe ingresar un monto válido mayor que cero.'
         });
+
     }
 
     if (!tipo_movimiento) {
+
         return res.status(400).json({
             error: 'Debe indicar el tipo de movimiento.'
         });
+
     }
 
     if (!metodo_pago_id) {
+
         return res.status(400).json({
             error: 'Debe seleccionar un método de pago.'
         });
+
     }
 
     try {
@@ -991,9 +1065,11 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
         `, [usuario_id]);
 
         if (caja.length === 0) {
+
             return res.status(400).json({
                 error: 'Debe abrir una caja antes de registrar movimientos.'
             });
+
         }
 
         const caja_id = caja[0].id;
@@ -1017,24 +1093,70 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
         `, [metodo_pago_id]);
 
         if (metodo.length === 0) {
+
             return res.status(400).json({
                 error: 'El método de pago seleccionado no existe.'
             });
+
         }
 
         if (Number(metodo[0].activo) !== 1) {
+
             return res.status(400).json({
                 error: 'El método de pago está deshabilitado.'
             });
+
         }
 
         if (
             Number(metodo[0].requiere_referencia) === 1 &&
             (!referencia_pago || referencia_pago.trim() === '')
         ) {
+
             return res.status(400).json({
                 error: 'Este método de pago requiere una referencia.'
             });
+
+        }
+
+        // =========================================================
+        // VALIDAR ORIGEN DEL MOVIMIENTO
+        // =========================================================
+
+        const origenFinal =
+            origen_pago || 'GENERAL';
+
+        const descripcionFinal =
+            descripcion_origen && descripcion_origen.trim() !== ''
+                ? descripcion_origen.trim()
+                : null;
+
+        if (origenFinal === 'ORDEN') {
+
+            if (!orden_id) {
+
+                return res.status(400).json({
+                    error: 'Debe seleccionar una orden de trabajo.'
+                });
+
+            }
+
+            const [orden] = await db.query(`
+                SELECT
+                    id
+                FROM brinco_creativo.ordenes
+                WHERE id = ?
+                LIMIT 1
+            `, [orden_id]);
+
+            if (orden.length === 0) {
+
+                return res.status(400).json({
+                    error: 'La orden indicada no existe.'
+                });
+
+            }
+
         }
 
         // =========================================================
@@ -1051,11 +1173,13 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
                 categoria_pago,
                 metodo_pago_id,
                 referencia_pago,
-                nota_pago
+                nota_pago,
+                origen_pago,
+                descripcion_origen
             )
             VALUES
             (
-                ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
         `,
         [
@@ -1066,7 +1190,9 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
             categoria_pago,
             metodo_pago_id,
             referencia_pago || null,
-            nota_pago || null
+            nota_pago || null,
+            origenFinal,
+            descripcionFinal
         ]);
 
         // =========================================================
@@ -1074,15 +1200,25 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
         // =========================================================
 
         res.json({
+
             ok: true,
+
             mensaje: 'Movimiento registrado correctamente.',
+
             id: result.insertId,
+
             caja_cierre_id: caja_id,
+
             metodo_pago: {
+
                 id: metodo[0].id,
+
                 nombre: metodo[0].nombre,
+
                 codigo: metodo[0].codigo
+
             }
+
         });
 
     } catch (err) {
@@ -1090,8 +1226,11 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
         console.error(err);
 
         res.status(500).json({
+
             error: 'Error interno del servidor.',
+
             detalle: err.message
+
         });
 
     }
