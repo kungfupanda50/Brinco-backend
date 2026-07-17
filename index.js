@@ -1545,6 +1545,57 @@ app.get('/api/caja/historico', autenticar, autorizar('p_historial_caja'), async 
 
 });
 
+// =============================================================================
+// REPORTE DE CAJA (FILTRABLE)
+// =============================================================================
+app.get('/api/caja/reporte', autenticar, autorizar('p_caja'), async (req, res) => {
+    try {
+        const { fechaInicio, fechaFin, usuarioId, cajaId, ordenId } = req.query;
+        
+        let sql = `
+            SELECT 
+                p.id, p.fecha_pago, p.monto, p.tipo_movimiento, p.categoria_pago, 
+                p.referencia_pago, p.nota_pago, p.origen_pago, p.descripcion_origen,
+                mp.nombre AS metodo_pago,
+                cc.id AS caja_id, u.nombre AS usuario_nombre,
+                o.id AS orden_id, c.nombre_completo AS cliente_nombre
+            FROM pagos p
+            LEFT JOIN cajas_cierres cc ON p.caja_cierre_id = cc.id
+            LEFT JOIN usuarios u ON cc.usuario_id = u.id
+            LEFT JOIN catalogo_metodos_pago mp ON p.metodo_pago_id = mp.id
+            LEFT JOIN ordenes o ON p.orden_id = o.id
+            LEFT JOIN clientes c ON o.cliente_id = c.id
+            WHERE 1=1
+        `;
+        
+        const params = [];
+        
+        if (fechaInicio && fechaFin) {
+            sql += ` AND DATE(p.fecha_pago) BETWEEN ? AND ?`;
+            params.push(fechaInicio, fechaFin);
+        }
+        if (usuarioId) {
+            sql += ` AND cc.usuario_id = ?`;
+            params.push(usuarioId);
+        }
+        if (cajaId) {
+            sql += ` AND p.caja_cierre_id = ?`;
+            params.push(cajaId);
+        }
+        if (ordenId) {
+            sql += ` AND p.orden_id = ?`;
+            params.push(ordenId);
+        }
+        
+        sql += ` ORDER BY p.fecha_pago DESC`;
+        
+        const [results] = await db.query(sql, params);
+        res.json(results);
+    } catch (err) {
+        res.status(500).json({ error: 'Error al generar reporte: ' + err.message });
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Carga todas las fotos de una orden con sus tags ya asignados
 // ─────────────────────────────────────────────────────────────────────────────
