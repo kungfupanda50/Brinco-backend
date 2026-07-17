@@ -468,11 +468,16 @@ app.get('/api/dashboard/stats', autenticar, autorizar('p_dashboard'), async (req
             SELECT 
                 (SELECT COUNT(*) FROM ordenes WHERE estado NOT IN ('Entregado', 'Cancelado', 'Rechazado')) as ordenes_activas,
                 (SELECT COUNT(*) FROM productos WHERE stock_actual <= stock_minimo AND activo = TRUE) as stock_bajo,
-                (SELECT COALESCE(SUM(total_quetzales), 0) FROM ordenes WHERE DATE(fecha_orden) = CURDATE() AND estado NOT IN ('Cancelado', 'Rechazado')) as ventas_hoy,
+                (SELECT COALESCE(SUM(monto), 0) FROM pagos WHERE tipo_movimiento = 'Ingreso' AND DATE(fecha_pago) = CURDATE()) as ventas_hoy,
                 (SELECT COALESCE(SUM(monto), 0) FROM pagos WHERE tipo_movimiento = 'Egreso' AND DATE(fecha_pago) = CURDATE()) as egresos_hoy
         `;
         const [results] = await db.query(sql);
-        res.json(results[0]);
+        
+        // Calculamos la utilidad restando egresos a los ingresos
+        const stats = results[0];
+        stats.utilidad_hoy = Number(stats.ventas_hoy) - Number(stats.egresos_hoy);
+        
+        res.json(stats);
     } catch (err) {
         res.status(500).json({ error: 'Error al recuperar estadísticas: ' + err.message });
     }
