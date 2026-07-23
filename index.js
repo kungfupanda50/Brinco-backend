@@ -1045,7 +1045,7 @@ app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) 
                 return res.status(400).json({ error: 'Debe seleccionar una orden o cotización.' });
             }
 
-            // Si viene orden_id, validamos que exista en DB
+            // Si viene orden_id, validamos que exista en DB.
             if (orden_id) {
                 const [orden] = await db.query(`SELECT id FROM brinco_creativo.ordenes WHERE id = ? LIMIT 1`, [orden_id]);
                 if (orden.length === 0) {
