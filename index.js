@@ -396,9 +396,15 @@ app.post('/api/usuarios', autenticar, autorizar('p_usuarios'), async (req, res) 
         const [resU] = await conn.query("INSERT INTO usuarios (nombre, usuario, password_hash, rol, activo) VALUES (?, ?, ?, ?, 1)", [nombre, usuario, hashedPassword, rol]);
         const userId = resU.insertId;
         const p = permisos || {};
-        const sqlP = `INSERT INTO usuarios_permisos (usuario_id, p_dashboard, p_clientes, p_ordenes, p_nueva_orden, p_inventario, p_proveedores, p_entrada_mercancia, p_caja, p_cat_clientes, p_cat_productos, p_usuarios) 
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-        await conn.query(sqlP, [userId, p.p_dashboard ?? 1, p.p_clientes ?? 1, p.p_ordenes ?? 1, p.p_nueva_orden ?? 1, p.p_inventario ?? 1, p.p_proveedores ?? 1, p.p_entrada_mercancia ?? 1, p.p_caja ?? 1, p.p_cat_clientes ?? 1, p.p_cat_productos ?? 1, p.p_usuarios ?? 0]);
+        const sqlP = `INSERT INTO usuarios_permisos (usuario_id, p_dashboard, p_clientes, p_ordenes, p_nueva_orden, p_inventario, p_proveedores, p_entrada_mercancia, p_caja, p_operar_caja, p_apertura_caja, p_cierre_caja, p_historial_caja, p_cat_clientes, p_cat_productos, p_usuarios) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        await conn.query(sqlP, [
+            userId, 
+            p.p_dashboard ?? 1, p.p_clientes ?? 1, p.p_ordenes ?? 1, p.p_nueva_orden ?? 1, 
+            p.p_inventario ?? 1, p.p_proveedores ?? 1, p.p_entrada_mercancia ?? 1, 
+            p.p_caja ?? 1, p.p_operar_caja ?? 1, p.p_apertura_caja ?? 1, p.p_cierre_caja ?? 1, p.historial_caja ?? 1,
+            p.p_cat_clientes ?? 1, p.p_cat_productos ?? 1, p.p_usuarios ?? 0
+        ]);
         await conn.commit();
         res.json({ id: userId, message: 'Usuario creado con éxito' });
     } catch (err) {
@@ -423,8 +429,16 @@ app.put('/api/usuarios/:id', autenticar, autorizar('p_usuarios'), async (req, re
         }
         if (permisos) {
             const p = permisos;
-            const sqlP = `UPDATE usuarios_permisos SET p_dashboard=?, p_clientes=?, p_ordenes=?, p_nueva_orden=?, p_inventario=?, p_proveedores=?, p_entrada_mercancia=?, p_caja=?, p_cat_clientes=?, p_cat_productos=?, p_usuarios=? WHERE usuario_id=?`;
-            await conn.query(sqlP, [p.p_dashboard, p.p_clientes, p.p_ordenes, p.p_nueva_orden, p.p_inventario, p.p_proveedores, p.p_entrada_mercancia, p.p_caja, p.p_cat_clientes, p.p_cat_productos, p.p_usuarios, id]);
+            const sqlP = `UPDATE usuarios_permisos SET 
+                p_dashboard=?, p_clientes=?, p_ordenes=?, p_nueva_orden=?, p_inventario=?, p_proveedores=?, p_entrada_mercancia=?, 
+                p_caja=?, p_operar_caja=?, p_apertura_caja=?, p_cierre_caja=?, p_historial_caja=?,
+                p_cat_clientes=?, p_cat_productos=?, p_usuarios=? 
+                WHERE usuario_id=?`;
+            await conn.query(sqlP, [
+                p.p_dashboard, p.p_clientes, p.p_ordenes, p.p_nueva_orden, p.p_inventario, p.p_proveedores, p.p_entrada_mercancia, 
+                p.p_caja, p.p_operar_caja, p.p_apertura_caja, p.p_cierre_caja, p.historial_caja,
+                p.p_cat_clientes, p.p_cat_productos, p.p_usuarios, id
+            ]);
         }
         await conn.commit();
         res.json({ message: 'Perfil y permisos actualizados' });
@@ -748,17 +762,26 @@ app.get('/api/ordenes',autenticar, autorizar('p_ordenes'), async (req, res) => {
 });
 
 app.post('/api/ordenes', autenticar, autorizar('p_nueva_orden'), async (req, res) => {
-    const { cliente_id, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas, materiales } = req.body;
+    const { cliente_id, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas, materiales, presupuesto_id } = req.body;
     const conn = await pool.promise().getConnection();
     try {
         await conn.beginTransaction();
-        const sqlO = "INSERT INTO ordenes (cliente_id, fecha_entrega_prometida, subtotal, total_costo_materiales, costo_mano_obra, costo_envio, cargo_administrativo, total_quetzales, porcentaje_utilidad_aplicado, notas_personalizacion, stock_rebajado) VALUES (?,?,?,?,?,?,?,?,?,?,0)";
-        const [resO] = await conn.query(sqlO, [cliente_id, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas]);
-        if (materiales) {
+        
+        // Insertamos la orden, ahora guardando el presupuesto_id
+        const sqlO = "INSERT INTO brinco_creativo.ordenes (cliente_id, presupuesto_id, fecha_entrega_prometida, subtotal, total_costo_materiales, costo_mano_obra, costo_envio, cargo_administrativo, total_quetzales, porcentaje_utilidad_aplicado, notas_personalizacion, stock_rebajado) VALUES (?,?,?,?,?,?,?,?,?,?,?,0)";
+        const [resO] = await conn.query(sqlO, [cliente_id, presupuesto_id || null, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas]);
+        
+        if (materiales && materiales.length > 0) {
             for (const m of materiales) {
-                await conn.query("INSERT INTO orden_detalles_materiales (orden_id, producto_id, cantidad, precio_unitario_momento, precio_venta_momento) VALUES (?,?,?,?,?)", [resO.insertId, m.producto_id, m.cantidad, m.costo_unitario, m.precio_venta]);
+                await conn.query("INSERT INTO brinco_creativo.orden_detalles_materiales (orden_id, producto_id, cantidad, precio_unitario_momento, precio_venta_momento) VALUES (?,?,?,?,?)", [resO.insertId, m.producto_id, m.cantidad, m.costo_unitario, m.precio_venta]);
             }
         }
+        
+        // Si la orden viene de una cotización, marcamos la cotización como "Convertida"
+        if (presupuesto_id) {
+            await conn.query("UPDATE brinco_creativo.presupuestos SET estado = 'Convertida' WHERE id = ?", [presupuesto_id]);
+        }
+
         await conn.commit();
         res.json({ id: resO.insertId });
     } catch (err) {
@@ -935,311 +958,142 @@ app.get(
 // =============================================================================
 
 app.get('/api/pagos', autenticar, autorizar('p_caja'), async (req, res) => {
-
     try {
-
         const sql = `
-            SELECT
-
-                p.id,
-                p.orden_id,
-                p.caja_cierre_id,
-                p.fecha_pago,
-                p.monto,
-                p.tipo_movimiento,
-                p.categoria_pago,
-
-                p.metodo_pago_id,
-                mp.nombre AS metodo_pago_nombre,
-                mp.codigo AS metodo_pago_codigo,
-
-                p.referencia_pago,
-                p.nota_pago,
-
-                p.origen_pago,
-                p.descripcion_origen,
-
-                o.id AS orden_num,
-                o.estado AS orden_estado,
-
-                c.id AS cliente_id,
-                c.nombre_completo AS cliente_nombre,
-
-                CONCAT(
-                    '#',
-                    o.id,
-                    ' - ',
-                    c.nombre_completo
-                ) AS orden_descripcion
-
+            SELECT 
+                p.id, p.orden_id, p.presupuesto_id, p.caja_cierre_id, p.fecha_pago, p.monto, 
+                p.tipo_movimiento, p.categoria_pago, p.metodo_pago_id, 
+                mp.nombre AS metodo_pago_nombre, mp.codigo AS metodo_pago_codigo,
+                p.referencia_pago, p.nota_pago, p.origen_pago, p.descripcion_origen,
+                o.id AS orden_num, o.estado AS orden_estado,
+                pres.numero_cotizacion AS presupuesto_num,
+                c.id AS cliente_id, c.nombre_completo AS cliente_nombre,
+                CONCAT('#', pres.numero_cotizacion, ' - ', c.nombre_completo) AS presupuesto_descripcion
             FROM brinco_creativo.pagos p
-
-            LEFT JOIN brinco_creativo.catalogo_metodos_pago mp
-                ON mp.id = p.metodo_pago_id
-
-            LEFT JOIN brinco_creativo.ordenes o
-                ON o.id = p.orden_id
-
-            LEFT JOIN brinco_creativo.clientes c
-                ON c.id = o.cliente_id
-
-            ORDER BY
-                p.fecha_pago DESC,
-                p.id DESC
+            LEFT JOIN brinco_creativo.catalogo_metodos_pago mp ON mp.id = p.metodo_pago_id
+            LEFT JOIN brinco_creativo.ordenes o ON o.id = p.orden_id
+            LEFT JOIN brinco_creativo.presupuestos pres ON pres.id = p.presupuesto_id
+            LEFT JOIN brinco_creativo.clientes c ON c.id = COALESCE(o.cliente_id, pres.cliente_id)
+            ORDER BY p.fecha_pago DESC, p.id DESC
         `;
-
         const [results] = await db.query(sql);
-
         res.json(results);
-
     } catch (err) {
-
-        console.error(err);
-
-        res.status(500).json({
-
-            error: 'Error al obtener los movimientos de caja.',
-
-            detalle: err.message
-
-        });
-
+        res.status(500).json({ error: err.message });
     }
-
 });
 
 app.post('/api/pagos', autenticar, autorizar('p_operar_caja'), async (req, res) => {
-
-    const {
-        orden_id,
-        monto,
-        tipo_movimiento,
-        categoria_pago,
-        metodo_pago_id,
-        referencia_pago,
-        nota_pago,
-
-        origen_pago,
-        descripcion_origen
-
-    } = req.body;
-
+    const { orden_id, presupuesto_id, monto, tipo_movimiento, categoria_pago, metodo_pago_id, referencia_pago, nota_pago, origen_pago, descripcion_origen } = req.body;
     const usuario_id = req.usuario.id;
 
     // =========================================================
     // VALIDACIONES
     // =========================================================
-
     if (!monto || isNaN(monto) || Number(monto) <= 0) {
-
-        return res.status(400).json({
-            error: 'Debe ingresar un monto válido mayor que cero.'
-        });
-
+        return res.status(400).json({ error: 'Debe ingresar un monto válido mayor que cero.' });
     }
-
     if (!tipo_movimiento) {
-
-        return res.status(400).json({
-            error: 'Debe indicar el tipo de movimiento.'
-        });
-
+        return res.status(400).json({ error: 'Debe indicar el tipo de movimiento.' });
     }
-
     if (!metodo_pago_id) {
-
-        return res.status(400).json({
-            error: 'Debe seleccionar un método de pago.'
-        });
-
+        return res.status(400).json({ error: 'Debe seleccionar un método de pago.' });
     }
 
     try {
-
         // =========================================================
         // BUSCAR CAJA ABIERTA DEL USUARIO
         // =========================================================
-
         const [caja] = await db.query(`
-            SELECT
-                id
-            FROM brinco_creativo.cajas_cierres
-            WHERE usuario_id = ?
-              AND estado = 'Abierta'
-            LIMIT 1
+            SELECT id FROM brinco_creativo.cajas_cierres 
+            WHERE usuario_id = ? AND estado = 'Abierta' LIMIT 1
         `, [usuario_id]);
 
         if (caja.length === 0) {
-
-            return res.status(400).json({
-                error: 'Debe abrir una caja antes de registrar movimientos.'
-            });
-
+            return res.status(400).json({ error: 'Debe abrir una caja antes de registrar movimientos.' });
         }
-
         const caja_id = caja[0].id;
 
         // =========================================================
         // VALIDAR MÉTODO DE PAGO
         // =========================================================
-
         const [metodo] = await db.query(`
-            SELECT
-                id,
-                nombre,
-                codigo,
-                requiere_referencia,
-                permite_vuelto,
-                permite_pago_mixto,
-                activo
-            FROM brinco_creativo.catalogo_metodos_pago
-            WHERE id = ?
-            LIMIT 1
+            SELECT id, nombre, codigo, requiere_referencia, permite_vuelto, permite_pago_mixto, activo 
+            FROM brinco_creativo.catalogo_metodos_pago 
+            WHERE id = ? LIMIT 1
         `, [metodo_pago_id]);
 
         if (metodo.length === 0) {
-
-            return res.status(400).json({
-                error: 'El método de pago seleccionado no existe.'
-            });
-
+            return res.status(400).json({ error: 'El método de pago seleccionado no existe.' });
         }
-
         if (Number(metodo[0].activo) !== 1) {
-
-            return res.status(400).json({
-                error: 'El método de pago está deshabilitado.'
-            });
-
+            return res.status(400).json({ error: 'El método de pago está deshabilitado.' });
         }
-
-        if (
-            Number(metodo[0].requiere_referencia) === 1 &&
-            (!referencia_pago || referencia_pago.trim() === '')
-        ) {
-
-            return res.status(400).json({
-                error: 'Este método de pago requiere una referencia.'
-            });
-
+        if (Number(metodo[0].requiere_referencia) === 1 && (!referencia_pago || referencia_pago.trim() === '')) {
+            return res.status(400).json({ error: 'Este método de pago requiere una referencia.' });
         }
 
         // =========================================================
         // VALIDAR ORIGEN DEL MOVIMIENTO
         // =========================================================
-
-        const origenFinal =
-            origen_pago || 'GENERAL';
-
-        const descripcionFinal =
-            descripcion_origen && descripcion_origen.trim() !== ''
-                ? descripcion_origen.trim()
-                : null;
+        const origenFinal = origen_pago || 'GENERAL';
+        const descripcionFinal = descripcion_origen && descripcion_origen.trim() !== '' ? descripcion_origen.trim() : null;
 
         if (origenFinal === 'ORDEN') {
-
-            if (!orden_id) {
-
-                return res.status(400).json({
-                    error: 'Debe seleccionar una orden de trabajo.'
-                });
-
+            // Si es de origen ORDEN, debe venir al menos un orden_id o presupuesto_id
+            if (!orden_id && !presupuesto_id) {
+                return res.status(400).json({ error: 'Debe seleccionar una orden o cotización.' });
             }
 
-            const [orden] = await db.query(`
-                SELECT
-                    id
-                FROM brinco_creativo.ordenes
-                WHERE id = ?
-                LIMIT 1
-            `, [orden_id]);
-
-            if (orden.length === 0) {
-
-                return res.status(400).json({
-                    error: 'La orden indicada no existe.'
-                });
-
+            // Si viene orden_id, validamos que exista en DB
+            if (orden_id) {
+                const [orden] = await db.query(`SELECT id FROM brinco_creativo.ordenes WHERE id = ? LIMIT 1`, [orden_id]);
+                if (orden.length === 0) {
+                    return res.status(400).json({ error: 'La orden indicada no existe.' });
+                }
             }
-
         }
 
         // =========================================================
         // REGISTRAR MOVIMIENTO
         // =========================================================
-
         const [result] = await db.query(`
-            INSERT INTO brinco_creativo.pagos
-            (
-                orden_id,
-                caja_cierre_id,
-                monto,
-                tipo_movimiento,
-                categoria_pago,
-                metodo_pago_id,
-                referencia_pago,
-                nota_pago,
-                origen_pago,
-                descripcion_origen
-            )
-            VALUES
-            (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            )
-        `,
-        [
-            orden_id || null,
-            caja_id,
-            Number(monto),
-            tipo_movimiento,
-            categoria_pago,
-            metodo_pago_id,
-            referencia_pago || null,
-            nota_pago || null,
-            origenFinal,
+            INSERT INTO brinco_creativo.pagos 
+            (orden_id, presupuesto_id, caja_cierre_id, monto, tipo_movimiento, categoria_pago, metodo_pago_id, referencia_pago, nota_pago, origen_pago, descripcion_origen) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            orden_id || null, 
+            presupuesto_id || null, 
+            caja_id, 
+            Number(monto), 
+            tipo_movimiento, 
+            categoria_pago, 
+            metodo_pago_id, 
+            referencia_pago || null, 
+            nota_pago || null, 
+            origenFinal, 
             descripcionFinal
         ]);
 
         // =========================================================
         // RESPUESTA
         // =========================================================
-
         res.json({
-
             ok: true,
-
             mensaje: 'Movimiento registrado correctamente.',
-
             id: result.insertId,
-
             caja_cierre_id: caja_id,
-
             metodo_pago: {
-
                 id: metodo[0].id,
-
                 nombre: metodo[0].nombre,
-
                 codigo: metodo[0].codigo
-
             }
-
         });
 
     } catch (err) {
-
         console.error(err);
-
-        res.status(500).json({
-
-            error: 'Error interno del servidor.',
-
-            detalle: err.message
-
-        });
-
+        res.status(500).json({ error: 'Error interno del servidor.', detalle: err.message });
     }
-
 });
 
 app.get('/api/caja/resumen', autenticar, autorizar('p_caja'), async (req, res) => {
@@ -1775,6 +1629,40 @@ app.get('/api/catalogo/tags', autenticar, async (req, res) => {
 });
 
 // =============================================================================
+// NUEVO FLUJO DE COTIZACIONES
+// =============================================================================
+
+// Listar todas las cotizaciones con su estado y saldo
+app.get('/api/presupuestos', autenticar, async (req, res) => {
+    try {
+        const [rows] = await db.query(`
+            SELECT p.id, p.numero_cotizacion, p.fecha_creacion, p.total, p.estado, 
+                   c.nombre_completo as cliente_nombre, m.simbolo as moneda_simbolo,
+                   (SELECT COALESCE(SUM(CASE WHEN tipo_movimiento = 'Ingreso' THEN monto ELSE -monto END), 0) 
+                    FROM brinco_creativo.pagos WHERE presupuesto_id = p.id) as total_pagado
+            FROM brinco_creativo.presupuestos p
+            JOIN brinco_creativo.clientes c ON p.cliente_id = c.id
+            JOIN brinco_creativo.monedas m ON p.moneda_id = m.id
+            ORDER BY p.fecha_creacion DESC
+        `);
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Cambiar estado de una cotización (Aceptada, Rechazada, etc.)
+app.patch('/api/presupuestos/:id/estado', autenticar, async (req, res) => {
+    try {
+        await db.query("UPDATE brinco_creativo.presupuestos SET estado = ? WHERE id = ?", [req.body.estado, req.params.id]);
+        res.json({ message: 'Estado de cotización actualizado' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
+// =============================================================================
 // ENDPOINTS DE PRESUPUESTOS
 // =============================================================================
 
@@ -1993,6 +1881,7 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                 const imgUrl = typeof img === 'string' ? img : img.url;
                 const esGrande = typeof img === 'string' ? false : img.grande;
                 if (!imgUrl) return '';
+                // Si es grande, ocupa todo. Si no, que ocupe 1/3 del ancho.
                 const clase = esGrande ? 'img-grande' : 'img-chica';
                 return `<img src="${imgUrl}" class="${clase}" />`;
             }).join('')}</div>`;
@@ -2005,14 +1894,18 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             const imgs = generateImageTags(imagenesPorLinea[d.id]);
             return `<tr>
                 <td>
-                    <div class="desc-text">${d.descripcion}</div>
+                    <div class="desc-text" style="font-size: 9px;">${d.descripcion}</div>
+                </td>
+                ${tieneColor ? `<td style="word-wrap: break-word; font-size: 9px;">${d.color || ''}</td>` : ''}
+                ${tieneMedidas ? `<td style="word-wrap: break-word; font-size: 9px;">${d.medidas || ''}</td>` : ''}
+                <td style="font-size: 9px;">${d.cantidad || ''}</td>
+                <td style="font-size: 9px;">${pres.moneda_simbolo} ${d.precio_unitario || ''}</td>
+                <td style="font-size: 9px;">${pres.moneda_simbolo} ${d.total_linea}</td>
+            </tr>
+            <tr>
+                <td colspan="${tieneColor ? (tieneMedidas ? '6' : '5') : (tieneMedidas ? '5' : '4')}">
                     ${imgs}
                 </td>
-                ${tieneColor ? `<td style="word-wrap: break-word; font-size: 11px;">${d.color || ''}</td>` : ''}
-                ${tieneMedidas ? `<td style="word-wrap: break-word; font-size: 11px;">${d.medidas || ''}</td>` : ''}
-                <td>${d.cantidad || ''}</td>
-                <td>${pres.moneda_simbolo} ${d.precio_unitario || ''}</td>
-                <td>${pres.moneda_simbolo} ${d.total_linea}</td>
             </tr>`;
         }).join('');
 
@@ -2075,11 +1968,11 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             .tabla { width: 100%; border-collapse: collapse; margin-top: 20px; table-layout: fixed; }
             .tabla th { background-color: ${pres.color_secundario}; color: white; padding: 10px; text-align: left; font-size: 14px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;}
             .tabla td { border-bottom: 1px solid #ddd; padding: 10px; vertical-align: top; word-wrap: break-word; }
-            .desc-text { margin-bottom: 8px; }
-            .img-container { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
-            .img-container img { object-fit: cover; border-radius: 6px; border: 1px solid #eee; }
-            .img-grande { width: 100%; max-width: 300px; height: auto; max-height: 300px; }
-            .img-chica { width: 90px; height: 90px; }
+            .desc-text { margin-bottom: 4px; }
+            .img-container { display: flex; flex-direction: row; gap: 8px; width: 100%; margin-top: 4px; margin-bottom: 8px; }
+            .img-container img { object-fit: cover; border-radius: 6px; border: 1px solid #eee; flex: 1; }
+            .img-grande { width: 100%; height: auto; max-height: 250px; flex: none; }
+            .img-chica { height: 100px; } /* Al tener flex: 1, ocuparán el espacio equitativamente */
             .sueltas-section { margin-top: 30px; border-top: 2px solid #eee; padding-top: 20px; }
             .totales { text-align: right; margin-top: 30px; }
             .totales p { margin: 5px 0; }
