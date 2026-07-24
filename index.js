@@ -2129,15 +2129,26 @@ app.post('/api/presupuestos/ia-descripcion', autenticar, async (req, res) => {
         });
 
         // Hacemos el prompt más estricto para que no salude ni dé opciones
-        const prompt = `Eres un copywriter experto en marketing. Tu tarea es redactar una descripción comercial breve (máximo 2 frases) para un presupuesto formal sobre: "${palabraLimpia}".
-        Enfócate en la calidad, el método de personalización y el impacto visual. 
-        Varía la redacción siempre.
-        Redacta el texto como personalizado para un cliente, no digas 
-        -Diseñamos y grabamos- en su lugar di -Diseño y grabado de xxxx con estilo único-.
-        Revisa que no se los estas vendiendo al público general, sino a un cliente que quiere un presupuesto formal.
-        Recuerda que el cliente ya te solicitó algo, este servicio es algo ya pactado, no intentes venderle algo más, solo describe lo que ya se va a hacer.
-        REGLAS: No uses comillas, ni simples ni dobles. No saludes. No ofrezcas opciones. Responde ÚNICAMENTE con el texto de la descripción.`;
-
+         const prompt = `Eres un redactor técnico comercial para la empresa "Brinco Creativo".
+        Tu tarea es redactar una descripción breve, formal y precisa (máximo 2 frases) para un presupuesto, basándote en: "${palabraLimpia}".
+        
+        Basado en el estilo real de la empresa, enfócate estrictamente en:
+        1. El producto final (ej. Gafete, Taza, Trofeo, Sticker, Textil).
+        2. Los materiales utilizados (ej. Acrílico, MDF, Dryfit, Metalium, Vinil, Algodón).
+        3. La técnica de personalización (ej. Sublimación, Grabado Láser, Impresión UV, DTF, Bordado, Corte).
+        4. Redacta en formato de acción/servicio, ej: "Diseño y grabado láser en...", "Sublimación full color sobre...", "Impresión UV en...". No uses "Diseñamos", usa "Diseño".
+        
+        Estilo de Brinco Creativo (Ejemplos reales):
+        - "Gafete identificador con domo de resina de 5.9 x 2 cm, de metalium magnético."
+        - "Camisa tipo polo, tela dry fit, sublimada full color."
+        - "Reconocimiento MDF/Acrílico con impresión UV, doble capa con vinilo espejo."
+        
+        Reglas estrictas:
+        - Tono formal y descriptivo. No uses lenguaje de ventas ni marketing excesivo.
+        - El cliente ya solicitó el servicio, solo describe lo que se va a hacer.
+        - No saludes, no ofrezcas opciones, no uses comillas (ni simples ni dobles).
+        - Responde ÚNICAMENTE con el texto de la descripción.`;
+        
         console.log(`2. Enviando petición a Groq (Llama 3.1)...`);
         
         const completion = await groq.chat.completions.create({
