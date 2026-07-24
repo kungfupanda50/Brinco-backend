@@ -2129,26 +2129,25 @@ app.post('/api/presupuestos/ia-descripcion', autenticar, async (req, res) => {
         });
 
         // Hacemos el prompt más estricto para que no salude ni dé opciones
-         const prompt = `Eres un redactor técnico comercial para la empresa "Brinco Creativo".
-        Tu tarea es redactar una descripción breve, formal y precisa (máximo 2 frases) para un presupuesto, basándote en: "${palabraLimpia}".
+        const prompt = `Eres un redactor técnico comercial para la empresa "Brinco Creativo".
+        Tu tarea es redactar una descripción breve, formal y precisa (máximo 2 frases) para un presupuesto, basándote en el siguiente requerimiento: "${palabraLimpia}".
         
-        Basado en el estilo real de la empresa, enfócate estrictamente en:
-        1. El producto final (ej. Gafete, Taza, Trofeo, Sticker, Textil).
-        2. Los materiales utilizados (ej. Acrílico, MDF, Dryfit, Metalium, Vinil, Algodón).
-        3. La técnica de personalización (ej. Sublimación, Grabado Láser, Impresión UV, DTF, Bordado, Corte).
-        4. Redacta en formato de acción/servicio, ej: "Diseño y grabado láser en...", "Sublimación full color sobre...", "Impresión UV en...". No uses "Diseñamos", usa "Diseño".
+        Reglas de Redacción:
+        1. Respeto absoluto: Basa la descripción en lo que el usuario solicitó. NO inventes materiales ni técnicas que no se mencionen o que sean técnicamente inviables para el producto (ej: no uses "láser" si es una taza, no uses "metalium" si es un textil).
+        2. Menciona el producto, el material (si se indicó) y la técnica (si se indicó).
+        3. Redacta en formato de acción/servicio. Ej: "Diseño y sublimación full color sobre...", "Impresión UV en...", "Corte y grabado láser de...". No uses "Diseñamos", usa "Diseño".
         
-        Estilo de Brinco Creativo (Ejemplos reales):
-        - "Gafete identificador con domo de resina de 5.9 x 2 cm, de metalium magnético."
-        - "Camisa tipo polo, tela dry fit, sublimada full color."
-        - "Reconocimiento MDF/Acrílico con impresión UV, doble capa con vinilo espejo."
+        Estilo de Brinco Creativo (Sobrio, directo, técnico):
+        - "Taza blanca de 11oz con sublimación full color."
+        - "Gafete identificador con domo de resina de 5.9 x 2 cm."
+        - "Reconocimiento MDF/Acrílico con impresión UV y doble capa."
         
         Reglas estrictas:
-        - Tono formal y descriptivo. No uses lenguaje de ventas ni marketing excesivo.
+        - Tono formal y descriptivo. No uses lenguaje de ventas.
         - El cliente ya solicitó el servicio, solo describe lo que se va a hacer.
         - No saludes, no ofrezcas opciones, no uses comillas (ni simples ni dobles).
         - Responde ÚNICAMENTE con el texto de la descripción.`;
-        
+
         console.log(`2. Enviando petición a Groq (Llama 3.1)...`);
         
         const completion = await groq.chat.completions.create({
