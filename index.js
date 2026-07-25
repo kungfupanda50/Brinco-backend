@@ -2037,11 +2037,11 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                 
                 <div style="page-break-inside: avoid; padding-top: 40px; padding-bottom: 10px;">
                     <div class="totales">
-                        ${parseFloat(pres.descuento) > 0 ? `
-                            <p>Subtotal: ${pres.moneda_simbolo} ${(parseFloat(pres.subtotal) + parseFloat(pres.costo_envio || 0)).toFixed(2)}</p>
-                            <p>Descuento: ${pres.moneda_simbolo} ${pres.descuento}</p>
-                        ` : ''}
-                        <h3 style="color: ${pres.color_primario};">Total: ${pres.moneda_simbolo} ${pres.total}</h3>
+                        <p>Subtotal: ${pres.moneda_simbolo} ${parseFloat(pres.subtotal).toFixed(2)}</p>
+                        ${parseFloat(pres.costo_envio) > 0 ? `<p>Envío: ${pres.moneda_simbolo} ${parseFloat(pres.costo_envio).toFixed(2)}</p>` : ''}
+                        ${parseFloat(pres.descuento) > 0 ? `<p>Descuento: - ${pres.moneda_simbolo} ${parseFloat(pres.descuento).toFixed(2)}</p>` : ''}
+                        ${pres.aplica_ipsp == 1 ? `<p>Timbre de Prensa (IPSP 0.5%): - ${pres.moneda_simbolo} ${parseFloat(pres.valor_ipsp).toFixed(2)}</p>` : ''}
+                        <h3 style="color: ${pres.color_primario};">Total: ${pres.moneda_simbolo} ${parseFloat(pres.total).toFixed(2)}</h3>
                     </div>
                 </div>
 
@@ -2050,7 +2050,7 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                         <p style="margin:0;"><strong>Nota:</strong> ${notaTexto}</p>
                     </div>
                     <div class="footer-bancos">
-                        BAC Cuenta: 0000-0000-0000-0000<br>
+                        BI Cuenta: 0000-0000-0000-0000<br>
                         Banrural Cuenta: 04913600769182<br>
                         A nombre de: Vivian Roxana Villatoro Rodríguez
                     </div>
