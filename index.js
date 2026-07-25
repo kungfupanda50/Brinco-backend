@@ -2028,6 +2028,8 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                         <p class="header-data">${pres.nombre_completo}</p>
                         <p class="header-title">Contacto:</p>
                         <p class="header-data">${pres.telefono || 'N/A'} | ${pres.email || 'N/A'}</p>
+                        <p class="header-title">Dirección de Envío:</p>
+                        <p class="header-data">${pres.direccion_envio || 'No especificada'}</p>
                     </div>
                 </div>
                 
