@@ -1931,7 +1931,19 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                 <td>${pres.moneda_simbolo} ${pres.costo_envio}</td>
             </tr>`;
         }
-
+        // NUEVO: Fila para el Timbre de Prensa (IPSP)
+        let filaIpsp = '';
+        if (pres.aplica_ipsp == 1 && pres.valor_ipsp > 0) {
+            filaIpsp = `
+            <tr style="background-color: #f8f9fa;">
+                <td><div class="desc-text" style="font-weight: bold;">Timbre de Prensa (IPSP 0.5%)</div></td>
+                ${tieneColor ? '<td></td>' : ''}
+                ${tieneMedidas ? '<td></td>' : ''}
+                <td>1</td>
+                <td>${pres.moneda_simbolo} ${parseFloat(pres.valor_ipsp).toFixed(2)}</td>
+                <td>${pres.moneda_simbolo} ${parseFloat(pres.valor_ipsp).toFixed(2)}</td>
+            </tr>`;
+        }
         const seccionSueltas = imagenesSueltas.length > 0 ? `
             <div class="sueltas-section">
                 ${generateImageTags(imagenesSueltas)}
@@ -1980,9 +1992,9 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
             .tabla td { border-bottom: 1px solid #ddd; padding: 10px; vertical-align: top; word-wrap: break-word; }
             .desc-text { margin-bottom: 4px; }
             .img-container { display: flex; flex-direction: row; gap: 8px; width: 100%; margin-top: 4px; margin-bottom: 8px; }
-            .img-container img { object-fit: cover; border-radius: 6px; border: 1px solid #eee; flex: 1; }
-            .img-grande { width: 100%; height: auto; max-height: 250px; flex: none; }
-            .img-chica { height: 100px; } /* Al tener flex: 1, ocuparán el espacio equitativamente */
+            .img-container img { object-fit: cover; border-radius: 6px; border: 1px solid #eee; }
+            .img-grande { width: 100%; max-width: 300px; height: auto; max-height: 300px; flex: none; }
+            .img-chica { width: 90px; height: 90px; flex: none; } 
             .sueltas-section { margin-top: 30px; border-top: 2px solid #eee; padding-top: 20px; }
             .totales { text-align: right; margin-top: 30px; }
             .totales p { margin: 5px 0; }
@@ -2030,6 +2042,7 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                     </tr>
                     ${filasTabla}
                     ${filaEnvio}
+                    ${filaIpsp}
                 </table>
                 
                 ${seccionSueltas}
