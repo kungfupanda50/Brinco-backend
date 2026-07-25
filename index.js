@@ -762,20 +762,14 @@ app.get('/api/ordenes',autenticar, autorizar('p_ordenes'), async (req, res) => {
 });
 
 app.post('/api/ordenes', autenticar, autorizar('p_nueva_orden'), async (req, res) => {
-    const { cliente_id, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas, materiales, presupuesto_id } = req.body;
+    const { cliente_id, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas, presupuesto_id } = req.body;
     const conn = await pool.promise().getConnection();
     try {
         await conn.beginTransaction();
         
-        // Insertamos la orden, ahora guardando el presupuesto_id
+        // Insertamos la orden SIN materiales, solo vinculada a la cotización
         const sqlO = "INSERT INTO brinco_creativo.ordenes (cliente_id, presupuesto_id, fecha_entrega_prometida, subtotal, total_costo_materiales, costo_mano_obra, costo_envio, cargo_administrativo, total_quetzales, porcentaje_utilidad_aplicado, notas_personalizacion, stock_rebajado) VALUES (?,?,?,?,?,?,?,?,?,?,?,0)";
         const [resO] = await conn.query(sqlO, [cliente_id, presupuesto_id || null, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas]);
-        
-        if (materiales && materiales.length > 0) {
-            for (const m of materiales) {
-                await conn.query("INSERT INTO brinco_creativo.orden_detalles_materiales (orden_id, producto_id, cantidad, precio_unitario_momento, precio_venta_momento) VALUES (?,?,?,?,?)", [resO.insertId, m.producto_id, m.cantidad, m.costo_unitario, m.precio_venta]);
-            }
-        }
         
         // Si la orden viene de una cotización, marcamos la cotización como "Convertida"
         if (presupuesto_id) {
@@ -795,17 +789,25 @@ app.post('/api/ordenes', autenticar, autorizar('p_nueva_orden'), async (req, res
 // ==========================================================
 // MANTENIMIENTO DE MATERIALES POR ORDEN
 // ==========================================================
-
 app.post('/api/ordenes/:id/rebajar-stock',autenticar, autorizar('p_ordenes'), async (req, res) => {
     const { id } = req.params;
     const conn = await pool.promise().getConnection();
     try {
         await conn.beginTransaction();
-        const [materiales] = await conn.query("SELECT producto_id, cantidad FROM orden_detalles_materiales WHERE orden_id = ?", [id]);
+        
+        // Buscamos los materiales en la cotización vinculada a esta orden
+        const [materiales] = await conn.query(`
+            SELECT pdm.producto_id, pdm.cantidad 
+            FROM brinco_creativo.presupuestos_detalles_materiales pdm
+            JOIN brinco_creativo.ordenes o ON o.presupuesto_id = pdm.presupuesto_id
+            WHERE o.id = ?
+        `, [id]);
+        
         for (const m of materiales) {
-            await conn.query("UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?", [m.cantidad, m.producto_id]);
+            await conn.query("UPDATE brinco_creativo.productos SET stock_actual = stock_actual - ? WHERE id = ?", [m.cantidad, m.producto_id]);
         }
-        await conn.query("UPDATE ordenes SET stock_rebajado = 1 WHERE id = ?", [id]);
+        
+        await conn.query("UPDATE brinco_creativo.ordenes SET stock_rebajado = 1 WHERE id = ?", [id]);
         await conn.commit();
         res.json({ message: 'Existencias descontadas del inventario' });
     } catch (err) {
@@ -1711,9 +1713,9 @@ app.post('/api/presupuestos/upload-img', autenticar, uploadMem.single('imagen'),
 });
 
 // Crear Presupuesto
-// Crear Presupuesto
+// Crear Presupuesto (AHORA CON MATERIALES E IPSP)
 app.post('/api/presupuestos', autenticar, async (req, res) => {
-    const { cliente_id, orden_id, plantilla_id, moneda_id, lineas, imagenes_sueltas, subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional } = req.body;
+    const { cliente_id, orden_id, plantilla_id, moneda_id, lineas, imagenes_sueltas, subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional, materiales, aplica_ipsp, valor_ipsp } = req.body;
     const conn = await pool.promise().getConnection();
     
     try {
@@ -1725,37 +1727,36 @@ app.post('/api/presupuestos', autenticar, async (req, res) => {
         const yy = String(now.getFullYear()).slice(-2);
         const prefix = `BC${dd}${mm}${yy}`;
         
-        const [lastPres] = await conn.query("SELECT numero_cotizacion FROM presupuestos WHERE numero_cotizacion LIKE ? ORDER BY id DESC LIMIT 1", [`${prefix}%`]);
+        const [lastPres] = await conn.query("SELECT numero_cotizacion FROM brinco_creativo.presupuestos WHERE numero_cotizacion LIKE ? ORDER BY id DESC LIMIT 1", [`${prefix}%`]);
         let consecutivo = 1;
         if (lastPres.length > 0) consecutivo = parseInt(lastPres[0].numero_cotizacion.slice(-2)) + 1;
         const numeroCotizacion = `${prefix}${String(consecutivo).padStart(2, '0')}`;
 
         const [resP] = await conn.query(
-            `INSERT INTO presupuestos (numero_cotizacion, cliente_id, orden_id, usuario_id, tema_id, moneda_id, tipo_estructura, subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional) 
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-            [numeroCotizacion, cliente_id, orden_id, req.usuario.id, plantilla_id, moneda_id, 'simple', subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional]
+            `INSERT INTO brinco_creativo.presupuestos (numero_cotizacion, cliente_id, orden_id, usuario_id, tema_id, moneda_id, tipo_estructura, subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional, aplica_ipsp, valor_ipsp, estado) 
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'Borrador')`,
+            [numeroCotizacion, cliente_id, orden_id, req.usuario.id, plantilla_id, moneda_id, 'simple', subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional, aplica_ipsp ? 1 : 0, valor_ipsp || 0]
         );
         
         const presupuestoId = resP.insertId;
 
-        // Guardar líneas y sus imágenes
-        for (const linea of lineas) {
-            const [resL] = await conn.query(
-                "INSERT INTO presupuestos_detalles (presupuesto_id, descripcion, metadata, color, medidas, cantidad, precio_unitario, total_linea) VALUES (?,?,?,?,?,?,?,?)",
-                [presupuestoId, linea.descripcion, JSON.stringify(linea.metadata || {}), linea.color || '', linea.medidas || '', linea.cantidad, linea.precio_unitario, linea.total_linea]
-            );
-            
-            const detalleId = resL.insertId;
-            
-            if (linea.imagenes && linea.imagenes.length > 0) {
-                for (const img of linea.imagenes) {
-                    // AQUÍ ESTABA EL ERROR: Extraemos la URL del objeto
-                    const imgUrl = typeof img === 'string' ? img : img.url;
-                    const esGrande = typeof img === 'string' ? 0 : (img.grande ? 1 : 0);
-                    await conn.query(
-                        "INSERT INTO presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)",
-                        [presupuestoId, detalleId, imgUrl, esGrande]
-                    );
+        // Guardar líneas de texto (lo que ve el cliente)
+        if (lineas && lineas.length > 0) {
+            for (const linea of lineas) {
+                const [resL] = await conn.query(
+                    "INSERT INTO brinco_creativo.presupuestos_detalles (presupuesto_id, descripcion, metadata, color, medidas, cantidad, precio_unitario, total_linea) VALUES (?,?,?,?,?,?,?,?)",
+                    [presupuestoId, linea.descripcion, JSON.stringify(linea.metadata || {}), linea.color || '', linea.medidas || '', linea.cantidad, linea.precio_unitario, linea.total_linea]
+                );
+                
+                if (linea.imagenes && linea.imagenes.length > 0) {
+                    for (const img of linea.imagenes) {
+                        const imgUrl = typeof img === 'string' ? img : img.url;
+                        const esGrande = typeof img === 'string' ? 0 : (img.grande ? 1 : 0);
+                        await conn.query(
+                            "INSERT INTO brinco_creativo.presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)",
+                            [presupuestoId, resL.insertId, imgUrl, esGrande]
+                        );
+                    }
                 }
             }
         }
@@ -1763,12 +1764,21 @@ app.post('/api/presupuestos', autenticar, async (req, res) => {
         // Guardar imágenes sueltas
         if (imagenes_sueltas && imagenes_sueltas.length > 0) {
             for (const img of imagenes_sueltas) {
-                // AQUÍ TAMBIÉN: Extraemos la URL del objeto
                 const imgUrl = typeof img === 'string' ? img : img.url;
                 const esGrande = typeof img === 'string' ? 0 : (img.grande ? 1 : 0);
                 await conn.query(
-                    "INSERT INTO presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)",
+                    "INSERT INTO brinco_creativo.presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)",
                     [presupuestoId, null, imgUrl, esGrande]
+                );
+            }
+        }
+
+        // NUEVO: Guardar los materiales (insumos del inventario)
+        if (materiales && materiales.length > 0) {
+            for (const m of materiales) {
+                await conn.query(
+                    "INSERT INTO brinco_creativo.presupuestos_detalles_materiales (presupuesto_id, producto_id, cantidad, costo_unitario, precio_venta) VALUES (?,?,?,?,?)",
+                    [presupuestoId, m.producto_id, m.cantidad, m.costo_unitario, m.precio_venta]
                 );
             }
         }
