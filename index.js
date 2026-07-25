@@ -2023,13 +2023,19 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                             <p class="header-data">${new Date(pres.fecha_creacion).toLocaleDateString('es-GT', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
                         </div>
                     </div>
-                    <div style="margin-top: 20px;">
-                        <p class="header-title">Cliente:</p>
-                        <p class="header-data">${pres.nombre_completo}</p>
-                        <p class="header-title">Contacto:</p>
-                        <p class="header-data">${pres.telefono || 'N/A'} | ${pres.email || 'N/A'}</p>
-                        <p class="header-title">Dirección de Envío:</p>
-                        <p class="header-data">${pres.direccion_envio || 'No especificada'}</p>
+                    <div style="margin-top: 15px; font-size: 9px; line-height: 1.5;">
+                        <p style="margin: 0;">
+                            <span style="font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.5px;">Cliente:</span> 
+                            <span style="font-weight: bold; color: #333;">${pres.nombre_completo}</span>
+                        </p>
+                        <p style="margin: 0;">
+                            <span style="font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.5px;">Contacto:</span> 
+                            <span style="color: #333;">${pres.telefono || 'N/A'} | ${pres.email || 'N/A'}</span>
+                        </p>
+                        <p style="margin: 0;">
+                            <span style="font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.5px;">Dirección de Envío:</span> 
+                            <span style="color: #333;">${pres.direccion_envio || 'No especificada'}</span>
+                        </p>
                     </div>
                 </div>
                 
