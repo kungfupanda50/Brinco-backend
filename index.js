@@ -1641,7 +1641,7 @@ app.get('/api/catalogo/tags', autenticar, async (req, res) => {
 app.get('/api/presupuestos', autenticar, async (req, res) => {
     try {
         const [rows] = await db.query(`
-            SELECT p.id, p.numero_cotizacion, p.fecha_creacion, p.total, p.estado, 
+            SELECT p.id, p.cliente_id, p.numero_cotizacion, p.fecha_creacion, p.total, p.estado, 
                    c.nombre_completo as cliente_nombre, m.simbolo as moneda_simbolo,
                    (SELECT COALESCE(SUM(CASE WHEN tipo_movimiento = 'Ingreso' THEN monto ELSE -monto END), 0) 
                     FROM brinco_creativo.pagos WHERE presupuesto_id = p.id) as total_pagado
