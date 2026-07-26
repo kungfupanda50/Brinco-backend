@@ -750,10 +750,13 @@ app.put('/api/clientes/categorias/:id',autenticar, autorizar('p_cat_clientes'), 
 app.get('/api/ordenes',autenticar, autorizar('p_ordenes'), async (req, res) => {
     try {
         const sql = `
-            SELECT o.*, c.nombre_completo as cliente_nombre,
+            SELECT o.*, c.nombre_completo as cliente_nombre, p.numero_cotizacion as presupuesto_num,
             (SELECT COALESCE(SUM(CASE WHEN tipo_movimiento = 'Ingreso' THEN monto ELSE -monto END), 0) FROM pagos WHERE orden_id = o.id) as total_pagado,
             (SELECT COUNT(*) FROM orden_evidencias WHERE orden_id = o.id) as total_evidencias
-            FROM ordenes o JOIN clientes c ON o.cliente_id = c.id ORDER BY o.fecha_orden DESC`;
+            FROM ordenes o 
+            JOIN clientes c ON o.cliente_id = c.id 
+            LEFT JOIN presupuestos p ON o.presupuesto_id = p.id
+            ORDER BY o.fecha_orden DESC`;
         const [results] = await db.query(sql);
         res.json(results);
     } catch (err) {
@@ -1653,6 +1656,28 @@ app.get('/api/presupuestos', autenticar, async (req, res) => {
     }
 });
 
+// Obtener cotización completa por ID (para cargarla en Nueva Orden o Editarla)
+app.get('/api/presupuestos/:id/full', autenticar, async (req, res) => {
+    try {
+        const [pres] = await db.query(`
+            SELECT p.id, p.cliente_id, p.total, p.costo_envio, p.descuento, p.texto_adicional, 
+                   p.tema_id, p.moneda_id, p.aplica_ipsp, c.nombre_completo as cliente_nombre
+            FROM brinco_creativo.presupuestos p
+            JOIN brinco_creativo.clientes c ON p.cliente_id = c.id
+            WHERE p.id = ?
+        `, [req.params.id]);
+
+        if (pres.length === 0) return res.status(404).json({ error: 'Cotización no encontrada' });
+
+        const [detalles] = await db.query("SELECT descripcion, cantidad, precio_unitario, total_linea, color, medidas FROM brinco_creativo.presupuestos_detalles WHERE presupuesto_id = ?", [req.params.id]);
+        const [materiales] = await db.query("SELECT producto_id, cantidad, costo_unitario, precio_venta FROM brinco_creativo.presupuestos_detalles_materiales WHERE presupuesto_id = ?", [req.params.id]);
+        
+        res.json({ ...pres[0], detalles, materiales });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Cambiar estado de una cotización (Aceptada, Rechazada, etc.)
 app.patch('/api/presupuestos/:id/estado', autenticar, async (req, res) => {
     try {
@@ -1922,7 +1947,7 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
         let filaEnvio = '';
         if (pres.costo_envio > 0) {
             filaEnvio = `
-            <tr style="background-color: #f8f9fa;">
+            <tr style="background-color: #f8f9fa; font-size: 9px;">
                 <td><div class="desc-text" style="font-weight: bold;">Costo de Envío</div></td>
                 ${tieneColor ? '<td></td>' : ''}
                 ${tieneMedidas ? '<td></td>' : ''}
@@ -1931,11 +1956,11 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                 <td>${pres.moneda_simbolo} ${pres.costo_envio}</td>
             </tr>`;
         }
-        // NUEVO: Fila para el Timbre de Prensa (IPSP)
+
         let filaIpsp = '';
         if (pres.aplica_ipsp == 1 && pres.valor_ipsp > 0) {
             filaIpsp = `
-            <tr style="background-color: #f8f9fa;">
+            <tr style="background-color: #f8f9fa; font-size: 9px;">
                 <td><div class="desc-text" style="font-weight: bold;">Timbre de Prensa (IPSP 0.5%)</div></td>
                 ${tieneColor ? '<td></td>' : ''}
                 ${tieneMedidas ? '<td></td>' : ''}
@@ -2056,34 +2081,32 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
                 ${seccionSueltas}
                 ${textoAdicionalHTML}
                 
-                <div style="page-break-inside: avoid; padding-top: 40px; padding-bottom: 10px;">
-                    <div class="totales">
+                         <div style="page-break-inside: avoid; padding-top: 40px; padding-bottom: 10px;">
+                    <div class="totales" style="font-size: 10px;">
                         <p>Subtotal: ${pres.moneda_simbolo} ${parseFloat(pres.subtotal).toFixed(2)}</p>
                         ${parseFloat(pres.costo_envio) > 0 ? `<p>Envío: ${pres.moneda_simbolo} ${parseFloat(pres.costo_envio).toFixed(2)}</p>` : ''}
                         ${parseFloat(pres.descuento) > 0 ? `<p>Descuento: - ${pres.moneda_simbolo} ${parseFloat(pres.descuento).toFixed(2)}</p>` : ''}
-                        ${pres.aplica_ipsp == 1 ? `<p>Timbre de Prensa (IPSP 0.5%): - ${pres.moneda_simbolo} ${parseFloat(pres.valor_ipsp).toFixed(2)}</p>` : ''}
-                        <h3 style="color: ${pres.color_primario};">Total: ${pres.moneda_simbolo} ${parseFloat(pres.total).toFixed(2)}</h3>
+                        ${pres.aplica_ipsp == 1 ? `<p>Timbre de Prensa (IPSP 0.5%): + ${pres.moneda_simbolo} ${parseFloat(pres.valor_ipsp).toFixed(2)}</p>` : ''}
+                        <h3 style="color: ${pres.color_primario}; font-size: 12px;">Total: ${pres.moneda_simbolo} ${parseFloat(pres.total).toFixed(2)}</h3>
                     </div>
                 </div>
 
-                <div class="footer" style="page-break-inside: avoid;">
-                    <div class="footer-nota">
-                        <p style="margin:0;"><strong>Nota:</strong> ${notaTexto}</p>
+                <div style="display: flex; justify-content: space-between; margin-top: 50px; border-top: 2px solid ${pres.color_primario}; padding-top: 20px; font-size: 10px; color: #555;">
+                    <div style="text-align: left; width: 48%;">
+                        <h4 style="margin: 0 0 8px 0; color: ${pres.color_primario}; font-size: 14px; font-weight: 900;">Brinco Creativo</h4>
+                        <p style="margin: 3px 0;">Ciudad Capital</p>
+                        <p style="margin: 3px 0;">brincocreativo.info@gmail.com</p>
+                        <p style="margin: 3px 0;">56359748</p>
                     </div>
-                    <div class="footer-bancos">
-                        BI Cuenta: 0000-0000-0000-0000<br>
-                        Banrural Cuenta: 04913600769182<br>
-                        A nombre de: Vivian Roxana Villatoro Rodríguez
-                    </div>
-                    <div class="footer-empresa">
-                        <h4>Brinco Creativo</h4>
-                        <p><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg> Ciudad Capital</p>
-                        <p><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg> brinocreativo.info@gmail.com</p>
-                        <p><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg> 56359748</p>
+                    <div style="text-align: right; width: 48%; font-weight: bold; color: #333;">
+                        <p style="margin: 0 0 8px 0; font-weight: 900;">Datos Bancarios</p>
+                        <p style="margin: 3px 0;">BAC Cuenta: 0000-0000-0000-0000</p>
+                        <p style="margin: 3px 0;">Banrural Cuenta: 04913600769182</p>
+                        <p style="margin: 3px 0;">A nombre de: Vivian Roxana Villatoro Rodríguez</p>
                     </div>
                 </div>
-            </div>
-        </body></html>`;
+                     
+            </body></html>`;
 
         let browser;
         try {
