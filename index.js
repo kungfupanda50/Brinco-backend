@@ -1656,12 +1656,12 @@ app.get('/api/presupuestos', autenticar, async (req, res) => {
     }
 });
 
-// Obtener cotización completa por ID (para cargarla en Nueva Orden o Editarla)
+
 // Obtener cotización completa por ID (para cargarla en Nueva Orden o Editarla)
 app.get('/api/presupuestos/:id/full', autenticar, async (req, res) => {
     try {
         const [pres] = await db.query(`
-            SELECT p.id, p.cliente_id, p.total, p.costo_envio, p.descuento, p.texto_adicional, 
+            SELECT p.id, p.numero_cotizacion, p.cliente_id, p.total, p.costo_envio, p.descuento, p.texto_adicional, 
                    p.tema_id, p.moneda_id, p.aplica_ipsp, p.valor_ipsp, c.nombre_completo as cliente_nombre
             FROM brinco_creativo.presupuestos p
             JOIN brinco_creativo.clientes c ON p.cliente_id = c.id
