@@ -1819,6 +1819,67 @@ app.post('/api/presupuestos', autenticar, async (req, res) => {
     }
 });
 
+// Actualizar Cotización (PUT)
+app.put('/api/presupuestos/:id', autenticar, async (req, res) => {
+    const { id } = req.params;
+    const { plantilla_id, moneda_id, lineas, imagenes_sueltas, subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional, materiales, aplica_ipsp, valor_ipsp } = req.body;
+    const conn = await pool.promise().getConnection();
+    
+    try {
+        await conn.beginTransaction();
+        
+        // 1. Actualizamos el registro principal
+        await conn.query(
+            `UPDATE brinco_creativo.presupuestos SET tema_id = ?, moneda_id = ?, subtotal = ?, descuento = ?, costo_envio = ?, total = ?, nota_anticipo = ?, texto_adicional = ?, aplica_ipsp = ?, valor_ipsp = ? WHERE id = ?`,
+            [plantilla_id, moneda_id, subtotal, descuento, costo_envio, total, nota_anticipo, texto_adicional, aplica_ipsp ? 1 : 0, valor_ipsp || 0, id]
+        );
+        
+        // 2. Borramos los detalles, imágenes y materiales viejos
+        await conn.query("DELETE FROM brinco_creativo.presupuestos_detalles WHERE presupuesto_id = ?", [id]);
+        await conn.query("DELETE FROM brinco_creativo.presupuestos_imagenes WHERE presupuesto_id = ?", [id]);
+        await conn.query("DELETE FROM brinco_creativo.presupuestos_detalles_materiales WHERE presupuesto_id = ?", [id]);
+        
+        // 3. Insertamos los nuevos (igual que en el POST)
+        if (lineas && lineas.length > 0) {
+            for (const linea of lineas) {
+                const [resL] = await conn.query(
+                    "INSERT INTO brinco_creativo.presupuestos_detalles (presupuesto_id, descripcion, metadata, color, medidas, cantidad, precio_unitario, total_linea) VALUES (?,?,?,?,?,?,?,?)",
+                    [id, linea.descripcion, JSON.stringify(linea.metadata || {}), linea.color || '', linea.medidas || '', linea.cantidad, linea.precio_unitario, linea.total_linea]
+                );
+                if (linea.imagenes && linea.imagenes.length > 0) {
+                    for (const img of linea.imagenes) {
+                        const imgUrl = typeof img === 'string' ? img : img.url;
+                        const esGrande = typeof img === 'string' ? 0 : (img.grande ? 1 : 0);
+                        await conn.query("INSERT INTO brinco_creativo.presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)", [id, resL.insertId, imgUrl, esGrande]);
+                    }
+                }
+            }
+        }
+
+        if (imagenes_sueltas && imagenes_sueltas.length > 0) {
+            for (const img of imagenes_sueltas) {
+                const imgUrl = typeof img === 'string' ? img : img.url;
+                const esGrande = typeof img === 'string' ? 0 : (img.grande ? 1 : 0);
+                await conn.query("INSERT INTO brinco_creativo.presupuestos_imagenes (presupuesto_id, detalle_id, ruta_archivo, es_grande) VALUES (?,?,?,?)", [id, null, imgUrl, esGrande]);
+            }
+        }
+
+        if (materiales && materiales.length > 0) {
+            for (const m of materiales) {
+                await conn.query("INSERT INTO brinco_creativo.presupuestos_detalles_materiales (presupuesto_id, producto_id, cantidad, costo_unitario, precio_venta) VALUES (?,?,?,?,?)", [id, m.producto_id, m.cantidad, m.costo_unitario, m.precio_venta]);
+            }
+        }
+
+        await conn.commit();
+        res.json({ id: parseInt(id) });
+    } catch (err) {
+        await conn.rollback();
+        res.status(500).json({ error: 'Error al actualizar: ' + err.message });
+    } finally {
+        conn.release();
+    }
+});
+
 // Obtener historial de presupuestos de un cliente
 app.get('/api/presupuestos/historial/:clienteId', autenticar, async (req, res) => {
     try {
@@ -2157,6 +2218,9 @@ app.get('/api/presupuestos/:id/pdf', autenticar, async (req, res) => {
         res.status(500).json({ error: 'Error general generando PDF: ' + err.message });
     }
 });
+
+
+
 
 // Función de espera (para reintentar cuando Google nos bloquee por 1 minuto)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
