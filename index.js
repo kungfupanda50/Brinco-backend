@@ -186,14 +186,16 @@ const autorizar = (permisoRequerido) => {
 // ==========================================================
 // MANTENIMIENTO DE MATERIALES POR ORDEN
 // ==========================================================
+// Obtener materiales de una orden específica (LEYENDO DESDE LA COTIZACIÓN)
 app.get('/api/ordenes/:id/materiales', autenticar, autorizar('p_ordenes'), async (req, res) => {
     try {
         const [rows] = await db.query(`
-            SELECT od.id, od.producto_id, p.nombre as producto_nombre, od.cantidad, 
-                   od.precio_unitario_momento as costo_unitario, od.precio_venta_momento as precio_venta
-            FROM orden_detalles_materiales od
-            JOIN productos p ON od.producto_id = p.id
-            WHERE od.orden_id = ?
+            SELECT pdm.id, pdm.producto_id, p.nombre as producto_nombre, pdm.cantidad, 
+                   pdm.costo_unitario as costo_unitario, pdm.precio_venta as precio_venta
+            FROM brinco_creativo.presupuestos_detalles_materiales pdm
+            JOIN brinco_creativo.ordenes o ON o.presupuesto_id = pdm.presupuesto_id
+            JOIN brinco_creativo.productos p ON pdm.producto_id = p.id
+            WHERE o.id = ?
         `, [req.params.id]);
         res.json(rows);
     } catch (err) {
@@ -201,6 +203,7 @@ app.get('/api/ordenes/:id/materiales', autenticar, autorizar('p_ordenes'), async
     }
 });
 
+// Actualizar los materiales de una orden (ACTUALIZANDO LA COTIZACIÓN VINCULADA)
 app.put('/api/ordenes/:id/materiales', autenticar, autorizar('p_ordenes'), async (req, res) => {
     const { id } = req.params;
     const { materiales } = req.body;
@@ -208,29 +211,27 @@ app.put('/api/ordenes/:id/materiales', autenticar, autorizar('p_ordenes'), async
     
     try {
         await conn.beginTransaction();
-        await conn.query("DELETE FROM orden_detalles_materiales WHERE orden_id = ?", [id]);
         
-        let totalVenta = 0;
-        let totalCosto = 0;
+        // 1. Buscamos el presupuesto_id asociado a esta orden
+        const [ordenData] = await conn.query("SELECT presupuesto_id FROM brinco_creativo.ordenes WHERE id = ?", [id]);
+        if (ordenData.length === 0 || !ordenData[0].presupuesto_id) {
+            throw new Error("La orden no tiene una cotización vinculada para editar materiales.");
+        }
+        const presupuestoId = ordenData[0].presupuesto_id;
 
+        // 2. Borramos los materiales anteriores de la cotización
+        await conn.query("DELETE FROM brinco_creativo.presupuestos_detalles_materiales WHERE presupuesto_id = ?", [presupuestoId]);
+        
+        // 3. Insertamos los nuevos materiales en la cotización
         for (const m of materiales) {
             await conn.query(
-                "INSERT INTO orden_detalles_materiales (orden_id, producto_id, cantidad, precio_unitario_momento, precio_venta_momento) VALUES (?, ?, ?, ?, ?)", 
-                [id, m.producto_id, m.cantidad, m.costo_unitario, m.precio_venta]
+                "INSERT INTO brinco_creativo.presupuestos_detalles_materiales (presupuesto_id, producto_id, cantidad, costo_unitario, precio_venta) VALUES (?, ?, ?, ?, ?)", 
+                [presupuestoId, m.producto_id, m.cantidad, m.costo_unitario, m.precio_venta]
             );
-            totalVenta += Number(m.cantidad) * Number(m.precio_venta || 0);
-            totalCosto += Number(m.cantidad) * Number(m.costo_unitario || 0);
-        }
-
-        const [ordenData] = await conn.query("SELECT costo_mano_obra, costo_envio, cargo_administrativo FROM ordenes WHERE id = ?", [id]);
-        if (ordenData.length > 0) {
-            const o = ordenData[0];
-            const nuevoTotal = totalVenta + Number(o.costo_mano_obra || 0) + Number(o.costo_envio || 0) + Number(o.cargo_administrativo || 0);
-            await conn.query("UPDATE ordenes SET subtotal = ?, total_costo_materiales = ?, total_quetzales = ? WHERE id = ?", [totalVenta, totalCosto, nuevoTotal, id]);
         }
 
         await conn.commit();
-        res.json({ message: 'Materiales actualizados correctamente' });
+        res.json({ message: 'Materiales actualizados correctamente en la cotización vinculada' });
     } catch (err) {
         await conn.rollback();
         res.status(500).json({ error: 'Error al actualizar materiales: ' + err.message });
@@ -766,8 +767,13 @@ app.get('/api/ordenes',autenticar, autorizar('p_ordenes'), async (req, res) => {
 
 app.post('/api/ordenes', autenticar, autorizar('p_nueva_orden'), async (req, res) => {
     const { cliente_id, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas, presupuesto_id } = req.body;
-        // Si viene vacío, le asignamos NULL para que MySQL no se queje
+    // Si viene vacío, le asignamos NULL
     const fechaEntregaFinal = fecha_entrega === '' ? null : fecha_entrega;
+
+    // NUEVO: Bloquear si no hay fecha
+    if (!fechaEntregaFinal) {
+        return res.status(400).json({ error: 'La fecha de entrega prometida es obligatoria.' });
+    }
     const conn = await pool.promise().getConnection();
     try {
         await conn.beginTransaction();
@@ -775,7 +781,7 @@ app.post('/api/ordenes', autenticar, autorizar('p_nueva_orden'), async (req, res
         // Insertamos la orden SIN materiales, solo vinculada a la cotización
         const sqlO = "INSERT INTO brinco_creativo.ordenes (cliente_id, presupuesto_id, fecha_entrega_prometida, subtotal, total_costo_materiales, costo_mano_obra, costo_envio, cargo_administrativo, total_quetzales, porcentaje_utilidad_aplicado, notas_personalizacion, stock_rebajado) VALUES (?,?,?,?,?,?,?,?,?,?,?,0)";
         const [resO] = await conn.query(sqlO, [cliente_id, presupuesto_id || null, fechaEntregaFinal, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas]);
-              
+
         // Si la orden viene de una cotización, marcamos la cotización como "Convertida"
         if (presupuesto_id) {
             await conn.query("UPDATE brinco_creativo.presupuestos SET estado = 'Convertida' WHERE id = ?", [presupuesto_id]);
