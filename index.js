@@ -1657,11 +1657,12 @@ app.get('/api/presupuestos', autenticar, async (req, res) => {
 });
 
 // Obtener cotización completa por ID (para cargarla en Nueva Orden o Editarla)
+// Obtener cotización completa por ID (para cargarla en Nueva Orden o Editarla)
 app.get('/api/presupuestos/:id/full', autenticar, async (req, res) => {
     try {
         const [pres] = await db.query(`
             SELECT p.id, p.cliente_id, p.total, p.costo_envio, p.descuento, p.texto_adicional, 
-                   p.tema_id, p.moneda_id, p.aplica_ipsp, c.nombre_completo as cliente_nombre
+                   p.tema_id, p.moneda_id, p.aplica_ipsp, p.valor_ipsp, c.nombre_completo as cliente_nombre
             FROM brinco_creativo.presupuestos p
             JOIN brinco_creativo.clientes c ON p.cliente_id = c.id
             WHERE p.id = ?
@@ -1669,10 +1670,36 @@ app.get('/api/presupuestos/:id/full', autenticar, async (req, res) => {
 
         if (pres.length === 0) return res.status(404).json({ error: 'Cotización no encontrada' });
 
-        const [detalles] = await db.query("SELECT descripcion, cantidad, precio_unitario, total_linea, color, medidas FROM brinco_creativo.presupuestos_detalles WHERE presupuesto_id = ?", [req.params.id]);
+        const [detalles] = await db.query("SELECT id, descripcion, cantidad, precio_unitario, total_linea, color, medidas FROM brinco_creativo.presupuestos_detalles WHERE presupuesto_id = ?", [req.params.id]);
         const [materiales] = await db.query("SELECT producto_id, cantidad, costo_unitario, precio_venta FROM brinco_creativo.presupuestos_detalles_materiales WHERE presupuesto_id = ?", [req.params.id]);
         
-        res.json({ ...pres[0], detalles, materiales });
+        // NUEVO: Traer las imágenes
+        const [imagenes] = await db.query("SELECT detalle_id, ruta_archivo, es_grande FROM brinco_creativo.presupuestos_imagenes WHERE presupuesto_id = ?", [req.params.id]);
+        
+        const imagenesPorLinea = {};
+        const imagenesSueltas = [];
+        imagenes.forEach(img => {
+            const imgObj = { url: img.ruta_archivo, grande: img.es_grande == 1 };
+            if (img.detalle_id) {
+                if (!imagenesPorLinea[img.detalle_id]) imagenesPorLinea[img.detalle_id] = [];
+                imagenesPorLinea[img.detalle_id].push(imgObj);
+            } else {
+                imagenesSueltas.push(imgObj);
+            }
+        });
+
+        // Adjuntar las imágenes a su línea correspondiente
+        const detallesConImagenes = detalles.map(d => ({
+            ...d,
+            imagenes: imagenesPorLinea[d.id] || []
+        }));
+        
+        res.json({ 
+            ...pres[0], 
+            detalles: detallesConImagenes, 
+            materiales, 
+            imagenes_sueltas: imagenesSueltas 
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
