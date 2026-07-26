@@ -766,14 +766,16 @@ app.get('/api/ordenes',autenticar, autorizar('p_ordenes'), async (req, res) => {
 
 app.post('/api/ordenes', autenticar, autorizar('p_nueva_orden'), async (req, res) => {
     const { cliente_id, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas, presupuesto_id } = req.body;
+        // Si viene vacío, le asignamos NULL para que MySQL no se queje
+    const fechaEntregaFinal = fecha_entrega === '' ? null : fecha_entrega;
     const conn = await pool.promise().getConnection();
     try {
         await conn.beginTransaction();
         
         // Insertamos la orden SIN materiales, solo vinculada a la cotización
         const sqlO = "INSERT INTO brinco_creativo.ordenes (cliente_id, presupuesto_id, fecha_entrega_prometida, subtotal, total_costo_materiales, costo_mano_obra, costo_envio, cargo_administrativo, total_quetzales, porcentaje_utilidad_aplicado, notas_personalizacion, stock_rebajado) VALUES (?,?,?,?,?,?,?,?,?,?,?,0)";
-        const [resO] = await conn.query(sqlO, [cliente_id, presupuesto_id || null, fecha_entrega, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas]);
-        
+        const [resO] = await conn.query(sqlO, [cliente_id, presupuesto_id || null, fechaEntregaFinal, subtotal, costo_materiales, mano_obra, envio, cargo_admin, total, utilidad_porcentaje, notas]);
+              
         // Si la orden viene de una cotización, marcamos la cotización como "Convertida"
         if (presupuesto_id) {
             await conn.query("UPDATE brinco_creativo.presupuestos SET estado = 'Convertida' WHERE id = ?", [presupuesto_id]);
