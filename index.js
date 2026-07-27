@@ -1422,7 +1422,7 @@ app.get('/api/caja/historico', autenticar, autorizar('p_historial_caja'), async 
 // =============================================================================
 app.get('/api/caja/reporte', autenticar, autorizar('p_caja'), async (req, res) => {
     try {
-        const { fechaInicio, fechaFin, usuarioId, cajaId, ordenId } = req.query;
+        const { fechaInicio, fechaFin, usuarioId, cajaId, ordenId, numeroCotizacion } = req.query;
         
         let sql = `
             SELECT 
@@ -1430,13 +1430,15 @@ app.get('/api/caja/reporte', autenticar, autorizar('p_caja'), async (req, res) =
                 p.referencia_pago, p.nota_pago, p.origen_pago, p.descripcion_origen,
                 mp.nombre AS metodo_pago,
                 cc.id AS caja_id, u.nombre AS usuario_nombre,
-                o.id AS orden_id, c.nombre_completo AS cliente_nombre
-            FROM pagos p
+                o.id AS orden_id, c.nombre_completo AS cliente_nombre,
+                pres.numero_cotizacion AS presupuesto_num
+            FROM brinco_creativo.pagos p
             LEFT JOIN cajas_cierres cc ON p.caja_cierre_id = cc.id
             LEFT JOIN usuarios u ON cc.usuario_id = u.id
             LEFT JOIN catalogo_metodos_pago mp ON p.metodo_pago_id = mp.id
             LEFT JOIN ordenes o ON p.orden_id = o.id
-            LEFT JOIN clientes c ON o.cliente_id = c.id
+            LEFT JOIN presupuestos pres ON p.presupuesto_id = pres.id
+            LEFT JOIN clientes c ON c.id = COALESCE(o.cliente_id, pres.cliente_id)
             WHERE 1=1
         `;
         
@@ -1457,6 +1459,10 @@ app.get('/api/caja/reporte', autenticar, autorizar('p_caja'), async (req, res) =
         if (ordenId) {
             sql += ` AND p.orden_id = ?`;
             params.push(ordenId);
+        }
+        if (numeroCotizacion) {
+            sql += ` AND pres.numero_cotizacion LIKE ?`;
+            params.push(`%${numeroCotizacion}%`);
         }
         
         sql += ` ORDER BY p.fecha_pago DESC`;
