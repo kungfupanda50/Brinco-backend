@@ -2307,10 +2307,10 @@ app.post('/api/presupuestos/ia-descripcion', autenticar, async (req, res) => {
         - No saludes, no ofrezcas opciones, no uses comillas (ni simples ni dobles).
         - Responde ÚNICAMENTE con el texto de la descripción.`;
 
-        console.log(`2. Enviando petición a Groq (Llama 3.1)...`);
+        console.log(`2. Enviando petición a Groq (llama-3.3-70b-versatile,)...`);
         
         const completion = await groq.chat.completions.create({
-            model: "llama-3.1-8b-instant",
+            model: "llama-3.3-70b-versatile",
             messages: [{ role: "user", content: prompt }],
             temperature: 0.9,
             max_tokens: 150, // Aumentamos el límite para que no se corte la frase
