@@ -2336,6 +2336,39 @@ app.post('/api/presupuestos/ia-descripcion', autenticar, async (req, res) => {
     }
 });
 
+// ==========================================================
+// ENDPOINTS ESPECIALES PARA N8N (BOT WHATSAPP)
+// ==========================================================
+
+// Buscar cliente por teléfono (para identificar en WhatsApp)
+app.get('/api/bot/clientes/telefono/:numero', async (req, res) => {
+    try {
+        const numero = req.params.numero;
+        // Quitamos el prefijo internacional si lo trae (ej. +502) para buscar más flexible
+        const numeroLimpio = numero.replace(/\D/g, '').slice(-8); 
+        const [rows] = await db.query("SELECT * FROM brinco_creativo.clientes WHERE REPLACE(REPLACE(telefono, ' ', ''), '-', '') LIKE CONCAT('%', ?, '%') LIMIT 1", [numeroLimpio]);
+        
+        if (rows.length > 0) {
+            res.json(rows[0]); // Devuelve el cliente
+        } else {
+            res.status(404).json({ error: 'No encontrado' });
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Buscar cliente por nombre (para casos donde el cliente dice "ya compré antes")
+app.get('/api/bot/clientes/nombre/:nombre', async (req, res) => {
+    try {
+        const nombre = req.params.nombre;
+        const [rows] = await db.query("SELECT id, nombre_completo, telefono FROM brinco_creativo.clientes WHERE nombre_completo LIKE CONCAT('%', ?, '%') LIMIT 5", [nombre]);
+        res.json(rows); // Devuelve hasta 5 coincidencias
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // =============================================================================
 // INICIO DEL SERVIDOR
 // =============================================================================
