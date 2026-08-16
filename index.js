@@ -2358,12 +2358,12 @@ app.get('/api/bot/clientes/telefono/:numero', async (req, res) => {
     }
 });
 
-// Buscar cliente por nombre (para casos donde el cliente dice "ya compré antes")
+// Buscar cliente por nombre (AHORA DEVUELVE TODOS LOS DATOS)
 app.get('/api/bot/clientes/nombre/:nombre', async (req, res) => {
     try {
         const nombre = req.params.nombre;
-        const [rows] = await db.query("SELECT id, nombre_completo, telefono FROM brinco_creativo.clientes WHERE nombre_completo LIKE CONCAT('%', ?, '%') LIMIT 5", [nombre]);
-        res.json(rows); // Devuelve hasta 5 coincidencias
+        const [rows] = await db.query("SELECT * FROM brinco_creativo.clientes WHERE nombre_completo LIKE CONCAT('%', ?, '%') LIMIT 5", [nombre]);
+        res.json(rows); // Devuelve hasta 5 coincidencias con TODA su info
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
