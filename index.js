@@ -648,13 +648,14 @@ app.get('/api/clientes/:id/historial',autenticar, autorizar('p_clientes'), async
 
 app.get('/api/inventario', autenticar, autorizar('p_inventario'), async (req, res) => {
     try {
-        const sql = "SELECT p.*, c.nombre as categoria_nombre FROM productos p LEFT JOIN categorias c ON p.categoria_id = c.id ORDER BY p.nombre ASC";
+        const sql = "SELECT p.*, c.nombre as categoria_nombre FROM brinco_creativo.productos p LEFT JOIN brinco_creativo.categorias c ON p.categoria_id = c.id ORDER BY p.nombre ASC";
         const [results] = await db.query(sql);
         res.json(results);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CREAR PRODUCTO (CON IMÁGENES A CLOUDINARY)
@@ -689,7 +690,7 @@ app.post('/api/inventario', autenticar, autorizar('p_inventario'), uploadMem.arr
             }
         }
 
-        const sql = "INSERT INTO productos (categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, imagen1_url, imagen2_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        const sql = "INSERT INTO brinco_creativo.productos (categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, imagen1_url, imagen2_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         const [result] = await db.query(sql, [categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, imagen1_url, imagen2_url]);
         
         res.json({ id: result.insertId });
@@ -707,7 +708,7 @@ app.put('/api/inventario/:id', autenticar, autorizar('p_inventario'), uploadMem.
     
     try {
         // Obtener URLs actuales de la base de datos
-        const [actual] = await db.query("SELECT imagen1_url, imagen2_url FROM productos WHERE id = ?", [id]);
+        const [actual] = await db.query("SELECT imagen1_url, imagen2_url FROM brinco_creativo.productos WHERE id = ?", [id]);
         
         if (actual.length === 0) {
             return res.status(404).json({ error: 'Producto no encontrado' });
@@ -745,7 +746,7 @@ app.put('/api/inventario/:id', autenticar, autorizar('p_inventario'), uploadMem.
             }
         }
 
-        const sql = "UPDATE productos SET categoria_id = ?, nombre = ?, descripcion = ?, sku = ?, stock_actual = ?, stock_minimo = ?, precio_compra_referencia = ?, precio_venta_sugerido = ?, imagen1_url = ?, imagen2_url = ? WHERE id = ?";
+        const sql = "UPDATE brinco_creativo.productos SET categoria_id = ?, nombre = ?, descripcion = ?, sku = ?, stock_actual = ?, stock_minimo = ?, precio_compra_referencia = ?, precio_venta_sugerido = ?, imagen1_url = ?, imagen2_url = ? WHERE id = ?";
         await db.query(sql, [categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, imagen1_url, imagen2_url, id]);
         
         res.json({ id: id });
@@ -759,7 +760,7 @@ app.patch('/api/inventario/:id/estado', autenticar, autorizar('p_inventario'), a
     const { id } = req.params;
     const { activo } = req.body;
     try {
-        await db.query("UPDATE productos SET activo = ? WHERE id = ?", [activo ? 1 : 0, id]);
+        await db.query("UPDATE brinco_creativo.productos SET activo = ? WHERE id = ?", [activo ? 1 : 0, id]);
         res.json({ message: 'Estado actualizado correctamente' });
     } catch (err) {
         res.status(500).json({ error: err.message });
