@@ -451,25 +451,44 @@ app.put('/api/usuarios/:id', autenticar, autorizar('p_usuarios'), async (req, re
     }
 });
 
-app.post('/api/usuarios/:id/avatar', autenticar, autorizar('p_usuarios'), uploadMem.single('avatar'), async (req, res) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// Sube una o varias fotos nuevas a una orden
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/api/ordenes/:id/evidencias', autenticar, autorizar('p_ordenes'), uploadMem.array('fotos', 10), async (req, res) => {
+    const { id } = req.params;
     try {
-        if (!req.file) return res.status(400).json({ error: 'Archivo de imagen requerido' });
-        
-        // Convertir el archivo de memoria a Base64
-        const b64 = Buffer.from(req.file.buffer).toString("base64");
-        const dataURI = "data:" + req.file.mimetype + ";base64," + b64;
-        
-        // Subir a Cloudinary
-        const uploadResponse = await cloudinary.uploader.upload(dataURI, {
-            folder: 'brinco-erp/avatars',
-            resource_type: 'image'
-        });
-        
-        const url = uploadResponse.secure_url;
-        await db.query("UPDATE usuarios SET avatar_url = ? WHERE id = ?", [url, req.params.id]);
-        res.json({ url });
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ error: 'No se recibieron archivos' });
+        }
+
+        const nuevasFotos = [];
+        for (const file of req.files) {
+            const b64 = Buffer.from(file.buffer).toString("base64");
+            const dataURI = "data:" + file.mimetype + ";base64," + b64;
+            
+            // Detectar si es imagen o video
+            const resource_type = file.mimetype.startsWith('video/') ? 'video' : 'image';
+            
+            const uploadResponse = await cloudinary.uploader.upload(dataURI, {
+                folder: 'brinco-erp/evidencias',
+                resource_type: resource_type
+            });
+            
+            const [result] = await db.query(
+                'INSERT INTO orden_evidencias (orden_id, url_archivo) VALUES (?, ?)',
+                [id, uploadResponse.secure_url]
+            );
+            
+            nuevasFotos.push({
+                id: result.insertId,
+                url_archivo: uploadResponse.secure_url,
+                tags: []
+            });
+        }
+
+        res.json({ message: 'Fotos subidas', fotos: nuevasFotos });
     } catch (err) {
-        res.status(500).json({ error: 'Error al subir avatar: ' + err.message });
+        res.status(500).json({ error: 'Error al subir fotos: ' + err.message });
     }
 });
 
@@ -637,23 +656,111 @@ app.get('/api/inventario', autenticar, autorizar('p_inventario'), async (req, re
     }
 });
 
-app.post('/api/inventario', autenticar, autorizar('p_inventario'), async (req, res) => {
-    const { categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido } = req.body;
+// ─────────────────────────────────────────────────────────────────────────────
+// CREAR PRODUCTO (CON IMÁGENES A CLOUDINARY)
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/api/inventario', autenticar, autorizar('p_inventario'), uploadMem.array('imagenes', 2), async (req, res) => {
     try {
-        const sql = "INSERT INTO productos (categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-        const [result] = await db.query(sql, [categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido]);
+        const { categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido } = req.body;
+
+        // Subir imágenes a Cloudinary si existen
+        let imagen1_url = null;
+        let imagen2_url = null;
+
+        if (req.files && req.files.length > 0) {
+            // Primera imagen
+            const b64_1 = Buffer.from(req.files[0].buffer).toString("base64");
+            const dataURI_1 = "data:" + req.files[0].mimetype + ";base64," + b64_1;
+            const upload1 = await cloudinary.uploader.upload(dataURI_1, {
+                folder: 'brinco-erp/productos',
+                resource_type: 'image'
+            });
+            imagen1_url = upload1.secure_url;
+
+            // Segunda imagen (si existe)
+            if (req.files[1]) {
+                const b64_2 = Buffer.from(req.files[1].buffer).toString("base64");
+                const dataURI_2 = "data:" + req.files[1].mimetype + ";base64," + b64_2;
+                const upload2 = await cloudinary.uploader.upload(dataURI_2, {
+                    folder: 'brinco-erp/productos',
+                    resource_type: 'image'
+                });
+                imagen2_url = upload2.secure_url;
+            }
+        }
+
+        const sql = "INSERT INTO productos (categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, imagen1_url, imagen2_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        const [result] = await db.query(sql, [categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, imagen1_url, imagen2_url]);
+        
         res.json({ id: result.insertId });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-app.put('/api/inventario/:id', autenticar, autorizar('p_inventario'), async (req, res) => {
-    const { categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido } = req.body;
+// ─────────────────────────────────────────────────────────────────────────────
+// ACTUALIZAR PRODUCTO (CON IMÁGENES A CLOUDINARY)
+// ─────────────────────────────────────────────────────────────────────────────
+app.put('/api/inventario/:id', autenticar, autorizar('p_inventario'), uploadMem.array('imagenes', 2), async (req, res) => {
+    const { id } = req.params;
+    const { categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, eliminar_imagen1, eliminar_imagen2 } = req.body;
+    
     try {
-        const sql = "UPDATE productos SET categoria_id = ?, nombre = ?, descripcion = ?, sku = ?, stock_actual = ?, stock_minimo = ?, precio_compra_referencia = ?, precio_venta_sugerido = ? WHERE id = ?";
-        const [result] = await db.query(sql, [categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, req.params.id]);
-        res.json({ id: req.params.id });
+        // Obtener URLs actuales de la base de datos
+        const [actual] = await db.query("SELECT imagen1_url, imagen2_url FROM productos WHERE id = ?", [id]);
+        
+        if (actual.length === 0) {
+            return res.status(404).json({ error: 'Producto no encontrado' });
+        }
+
+        let imagen1_url = actual[0].imagen1_url;
+        let imagen2_url = actual[0].imagen2_url;
+
+        // Manejar eliminación de imágenes existentes
+        if (eliminar_imagen1 === 'true') {
+            imagen1_url = null;
+        }
+        if (eliminar_imagen2 === 'true') {
+            imagen2_url = null;
+        }
+
+        // Subir nuevas imágenes si se enviaron
+        if (req.files && req.files.length > 0) {
+            const b64_1 = Buffer.from(req.files[0].buffer).toString("base64");
+            const dataURI_1 = "data:" + req.files[0].mimetype + ";base64," + b64_1;
+            const upload1 = await cloudinary.uploader.upload(dataURI_1, {
+                folder: 'brinco-erp/productos',
+                resource_type: 'image'
+            });
+            imagen1_url = upload1.secure_url;
+
+            if (req.files[1]) {
+                const b64_2 = Buffer.from(req.files[1].buffer).toString("base64");
+                const dataURI_2 = "data:" + req.files[1].mimetype + ";base64," + b64_2;
+                const upload2 = await cloudinary.uploader.upload(dataURI_2, {
+                    folder: 'brinco-erp/productos',
+                    resource_type: 'image'
+                });
+                imagen2_url = upload2.secure_url;
+            }
+        }
+
+        const sql = "UPDATE productos SET categoria_id = ?, nombre = ?, descripcion = ?, sku = ?, stock_actual = ?, stock_minimo = ?, precio_compra_referencia = ?, precio_venta_sugerido = ?, imagen1_url = ?, imagen2_url = ? WHERE id = ?";
+        await db.query(sql, [categoria_id, nombre, descripcion, sku, stock_actual, stock_minimo, precio_compra_referencia, precio_venta_sugerido, imagen1_url, imagen2_url, id]);
+        
+        res.json({ id: id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Cambiar solo el estado (activo/desactivo) de un producto
+app.patch('/api/inventario/:id/estado', autenticar, autorizar('p_inventario'), async (req, res) => {
+    const { id } = req.params;
+    const { activo } = req.body;
+    try {
+        await db.query("UPDATE productos SET activo = ? WHERE id = ?", [activo ? 1 : 0, id]);
+        res.json({ message: 'Estado actualizado correctamente' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
