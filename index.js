@@ -656,6 +656,28 @@ app.get('/api/inventario', autenticar, autorizar('p_inventario'), async (req, re
     }
 });
 
+app.get('/inventario-proveedores', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT pp.id,
+              pp.producto_id,
+              pp.proveedor_id,
+              DATE_FORMAT(pp.fecha_ultima_compra, '%Y-%m-%d') AS fecha_ultima_compra,
+              pp.documento,
+              pp.cantidad,
+              prov.nombre_empresa
+         FROM producto_proveedores pp
+         INNER JOIN proveedores prov ON prov.id = pp.proveedor_id
+        ORDER BY pp.producto_id ASC,
+                 pp.fecha_ultima_compra DESC,
+                 pp.id DESC`
+    )
+    res.json(rows)
+  } catch (error) {
+    console.error('Error al obtener producto-proveedores:', error)
+    res.status(500).json({ error: 'Error al obtener las relaciones producto-proveedor.' })
+  }
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CREAR PRODUCTO (CON IMÁGENES A CLOUDINARY)
@@ -1018,6 +1040,25 @@ app.post('/api/entradas', autenticar, autorizar('p_entrada_mercancia'), async (r
         for (const i of items) {
             await conn.query("INSERT INTO entrada_detalles (entrada_id, producto_id, cantidad, costo_unitario) VALUES (?,?,?,?)", [resE.insertId, i.producto_id, i.cantidad, i.costo]);
             await conn.query("UPDATE productos SET stock_actual = stock_actual + ?, precio_compra_referencia = ? WHERE id = ?", [i.cantidad, i.costo, i.producto_id]);
+        }
+        // NUEVO BRINCO: historial producto <-> proveedor
+        // Si nunca se le compró este producto a este proveedor, CREA la fila.
+        // Si ya existía, ACTUALIZA fecha, documento y cantidad con ESTA compra.
+        if (proveedor_id) {
+        for (const item of items) {
+            if (item.producto_id) {
+            await conn.query(
+                `INSERT INTO producto_proveedores
+                (producto_id, proveedor_id, fecha_ultima_compra, documento, cantidad)
+                VALUES (?, ?, CURDATE(), ?, ?) AS nueva
+                ON DUPLICATE KEY UPDATE
+                fecha_ultima_compra = nueva.fecha_ultima_compra,
+                documento = nueva.documento,
+                cantidad = nueva.cantidad`,
+                [item.producto_id, proveedor_id, documento, item.cantidad]
+            )
+            }
+        }
         }
         await conn.commit(); res.json({ id: resE.insertId });
     } catch (err) { await conn.rollback(); res.status(500).json({ error: err.message }); }
