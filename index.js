@@ -656,7 +656,7 @@ app.get('/api/inventario', autenticar, autorizar('p_inventario'), async (req, re
     }
 });
 
-app.get('/inventario-proveedores', async (req, res) => {
+app.get('/api/inventario-proveedores', autenticar, autorizar('p_inventario'), async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT pp.id,
@@ -676,6 +676,80 @@ app.get('/inventario-proveedores', async (req, res) => {
   } catch (error) {
     console.error('Error al obtener producto-proveedores:', error)
     res.status(500).json({ error: 'Error al obtener las relaciones producto-proveedor.' })
+  }
+})
+
+// ============================================================================
+// NUEVO BRINCO: guardar las relaciones producto <-> proveedor de UN producto
+// Recibe el set COMPLETO de relaciones del producto y lo reemplaza:
+// borra las que ya no vienen e inserta las nuevas. Asi el usuario puede
+// agregar, editar (fecha, documento, cantidad) y eliminar libremente desde
+// el modal de edicion del producto en Inventario.
+// Body esperado: { relaciones: [ { proveedor_id, fecha_ultima_compra, documento, cantidad }, ... ] }
+// ============================================================================
+app.put('/api/inventario/:id/proveedores', autenticar, autorizar('p_inventario'), async (req, res) => {
+  try {
+    const productoId = req.params.id
+    const relaciones = Array.isArray(req.body.relaciones) ? req.body.relaciones : []
+
+    // 1) El producto debe existir
+    const [prod] = await db.query('SELECT id FROM productos WHERE id = ? LIMIT 1', [productoId])
+    if (prod.length === 0) {
+      return res.status(404).json({ error: 'Producto no encontrado.' })
+    }
+
+    // 2) Filtra filas incompletas (sin proveedor elegido)
+    const limpias = relaciones.filter((r) => r && r.proveedor_id)
+
+    // 3) Todos los proveedores indicados deben existir
+    for (const r of limpias) {
+      const [p] = await db.query('SELECT id FROM proveedores WHERE id = ? LIMIT 1', [r.proveedor_id])
+      if (p.length === 0) {
+        return res.status(400).json({ error: `El proveedor con id ${r.proveedor_id} no existe.` })
+      }
+    }
+
+    // 4) Reemplaza el set completo dentro de una transaccion
+    const conn = await pool.promise().getConnection()
+    try {
+      await conn.beginTransaction()
+      await conn.query('DELETE FROM producto_proveedores WHERE producto_id = ?', [productoId])
+
+      for (const r of limpias) {
+        const fecha =
+          typeof r.fecha_ultima_compra === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.fecha_ultima_compra)
+            ? r.fecha_ultima_compra
+            : null
+        const documento = (r.documento || '').toString().trim() || null
+        const cantidadNum = Number(r.cantidad)
+        const cantidad =
+          r.cantidad === null || r.cantidad === undefined || r.cantidad === '' || Number.isNaN(cantidadNum)
+            ? null
+            : cantidadNum
+
+        await conn.query(
+          `INSERT INTO producto_proveedores
+             (producto_id, proveedor_id, fecha_ultima_compra, documento, cantidad)
+           VALUES (?, ?, ?, ?, ?)`,
+          [productoId, r.proveedor_id, fecha, documento, cantidad]
+        )
+      }
+
+      await conn.commit()
+      res.json({
+        ok: true,
+        total: limpias.length,
+        mensaje: 'Relaciones producto-proveedor actualizadas.',
+      })
+    } catch (errTx) {
+      await conn.rollback()
+      throw errTx
+    } finally {
+      conn.release()
+    }
+  } catch (error) {
+    console.error('Error al guardar relaciones producto-proveedor:', error)
+    res.status(500).json({ error: 'Error al guardar las relaciones producto-proveedor.' })
   }
 })
 
